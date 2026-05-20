@@ -15,6 +15,7 @@
 
 ## Current Features
 
+- Random character, perks, items, add-ons, and offerings (and amount of for perks/add-ons)
 - Slot "Spinning" Animation
 - Fireworks upon completion of a gauntlet
 - 10 most recent build saves (10 for survivor, 10 for killer)
