@@ -29,3 +29,5 @@
 3. type cd then paste what you just copied
 4. type .\portable_python\python.exe packager.py spinthewheel.py
 
+## Note
+This also searches for local Python installs
