@@ -1,10 +1,8 @@
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
-
-PORTABLE_FOLDER_NAME = "portable_python"
-PORTABLE_PYTHON_EXE = "python.exe"
-DEFAULT_SCRIPT_NAME = "spinthewheel.py"
 
 
 def app_folder():
@@ -14,114 +12,128 @@ def app_folder():
   return Path(__file__).resolve().parent
 
 
-def portable_folder():
-  return app_folder() / PORTABLE_FOLDER_NAME
+def find_python(root_folder):
+  portable_python = root_folder / "portable_python" / "python.exe"
+
+  if portable_python.exists():
+    return [str(portable_python)]
+
+  for command in ["py", "python", "python3"]:
+    if shutil.which(command):
+      return [command]
+
+  print("Python was not found.")
+  print(f"Expected portable Python at: {portable_python}")
+  print("Or install Python normally and make sure py/python is available.")
+  sys.exit(1)
 
 
-def portable_python_path():
-  return portable_folder() / PORTABLE_PYTHON_EXE
-
-
-def run_command(command, cwd):
-  completed = subprocess.run(command, cwd=cwd)
-
-  if completed.returncode != 0:
-    raise SystemExit(completed.returncode)
-
-
-def ensure_script_exists(script_path):
-  if not script_path.exists():
-    print(f"Script file does not exist: {script_path}")
-    raise SystemExit(1)
-
-  if script_path.suffix.lower() != ".py":
-    print(f"Expected a .py file, but got: {script_path}")
-    raise SystemExit(1)
-
-
-def ensure_portable_python_exists(python_exe):
-  if python_exe.exists():
+def add_binary_args(command, source, destination):
+  if not source.exists():
     return
 
-  print("Portable Python was not found.")
-  print()
-  print(f"Expected: {python_exe}")
-  print()
-  print("Place a Windows portable Python environment in the portable_python folder")
-  print("with PyInstaller installed, then run this packager again.")
-  raise SystemExit(1)
+  command.extend([
+    "--add-binary",
+    f"{source}{';'}{destination}",
+  ])
 
 
-def ensure_pyinstaller_available(python_exe):
-  check_command = [str(python_exe), "-m", "PyInstaller", "--version"]
-  completed = subprocess.run(
-    check_command,
-    cwd=app_folder(),
-    stdout=subprocess.DEVNULL,
-    stderr=subprocess.DEVNULL
-  )
-
-  if completed.returncode == 0:
+def add_data_args(command, source, destination):
+  if not source.exists():
     return
 
-  print("PyInstaller is not available in portable_python.")
-  print()
-  print("Install PyInstaller into the bundled portable Python environment,")
-  print("then run this packager again.")
-  print()
-  print("Expected command to work:")
-  print(f"  {python_exe} -m PyInstaller --version")
-  raise SystemExit(1)
+  command.extend([
+    "--add-data",
+    f"{source}{';'}{destination}",
+  ])
 
 
-def resolve_script_path(args):
-  if args:
-    script_path = Path(args[0])
-    if not script_path.is_absolute():
-      script_path = app_folder() / script_path
-    return script_path.resolve()
+def main(program):
+  root_folder = app_folder()
+  program_path = (root_folder / program).resolve()
 
-  return (app_folder() / DEFAULT_SCRIPT_NAME).resolve()
+  if not program_path.exists():
+    print(f"Script file does not exist: {program_path}")
+    sys.exit(1)
 
+  portable_folder = root_folder / "portable_python"
+  portable_dlls = portable_folder / "DLLs"
+  portable_tcl = portable_folder / "tcl"
 
-def build_exe(script_path):
-  python_exe = portable_python_path()
+  python_command = find_python(root_folder)
 
-  ensure_script_exists(script_path)
-  ensure_portable_python_exists(python_exe)
-  ensure_pyinstaller_available(python_exe)
+  dist_folder = root_folder / "dist"
+  build_folder = Path(tempfile.gettempdir()) / "dbd_slot_machine_pyinstaller_build"
+  spec_folder = Path(tempfile.gettempdir()) / "dbd_slot_machine_pyinstaller_spec"
 
-  output_name = script_path.stem
+  shutil.rmtree(build_folder, ignore_errors=True)
+  shutil.rmtree(spec_folder, ignore_errors=True)
 
-  command = [
-    str(python_exe),
+  build_folder.mkdir(parents=True, exist_ok=True)
+  spec_folder.mkdir(parents=True, exist_ok=True)
+  dist_folder.mkdir(parents=True, exist_ok=True)
+
+  print("Building executable...")
+  print(f"Project folder: {root_folder}")
+  print(f"Python command: {' '.join(python_command)}")
+  print(f"Script: {program_path}")
+  print(f"Build folder: {build_folder}")
+  print(f"Spec folder: {spec_folder}")
+
+  command = python_command + [
     "-m",
     "PyInstaller",
     "--onefile",
     "--noconsole",
     "--clean",
-    "--name",
-    output_name,
-    str(script_path)
+    "--noconfirm",
+
+    "--collect-all",
+    "PIL",
+    "--collect-binaries",
+    "PIL",
+    "--collect-data",
+    "PIL",
+    "--hidden-import",
+    "PIL",
+    "--hidden-import",
+    "PIL.Image",
+    "--hidden-import",
+    "PIL.ImageTk",
+    "--hidden-import",
+    "PIL._imaging",
+    "--hidden-import",
+    "PIL._imagingtk",
+    "--hidden-import",
+    "PIL._tkinter_finder",
+
+    "--distpath",
+    str(dist_folder),
+    "--workpath",
+    str(build_folder),
+    "--specpath",
+    str(spec_folder),
   ]
 
-  print("Building executable with bundled portable Python...")
-  print(f"Project folder: {app_folder()}")
-  print(f"Python: {python_exe}")
-  print(f"Script: {script_path}")
-  print()
+  add_binary_args(command, portable_dlls, "DLLs")
+  add_data_args(command, portable_tcl, "tcl")
 
-  run_command(command, cwd=app_folder())
+  command.append(str(program_path))
 
-  print()
-  print("Build complete.")
-  print(f"Executable should be in: {app_folder() / 'dist'}")
+  result = subprocess.run(command, cwd=root_folder)
 
+  if result.returncode != 0:
+    print("Build failed.")
+    sys.exit(result.returncode)
 
-def main():
-  script_path = resolve_script_path(sys.argv[1:])
-  build_exe(script_path)
+  output_file = dist_folder / f"{program_path.stem}.exe"
+  print(f"Build complete: {output_file}")
 
 
 if __name__ == "__main__":
-  main()
+  args = sys.argv[1:]
+
+  if not args:
+    sys.exit(1)
+
+  main(args[0])
