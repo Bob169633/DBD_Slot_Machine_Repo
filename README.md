@@ -15,6 +15,7 @@
 
 ## Current Features
 
+- Random character, perks, items, add-ons, and offerings (and amount of for perks/add-ons)
 - Slot "Spinning" Animation
 - Fireworks upon completion of a gauntlet
 - 10 most recent build saves (10 for survivor, 10 for killer)
@@ -29,3 +30,5 @@
 3. type cd then paste what you just copied
 4. type .\portable_python\python.exe packager.py spinthewheel.py
 
+## Note
+This also searches for local Python installs
