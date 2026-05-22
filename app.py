@@ -88,6 +88,22 @@ class BuildSlotMachineApp:
 
     self.last_rolls = {"Survivor": None, "Killer": None}
     self.history_store = BuildHistoryStore()
+    self.gauntlet_stats = {
+      "Survivor": {
+        "current_streak": 0,
+        "max_streak": 0,
+        "failure_count": 0
+      },
+      "Killer": {
+        "current_streak": 0,
+        "max_streak": 0,
+        "failure_count": 0
+      }
+    }
+    self.gauntlet_result_pending = {
+      "Survivor": False,
+      "Killer": False
+    }
 
     self.addon_count = tk.IntVar(value=2)
     self.include_character = tk.BooleanVar(value=True)
@@ -101,6 +117,9 @@ class BuildSlotMachineApp:
     self.debug_addon_1_choice = tk.StringVar(value="Random")
     self.debug_addon_2_choice = tk.StringVar(value="Random")
     self.debug_offering_choice = tk.StringVar(value="Random")
+    self.debug_gauntlet_spin_count = tk.StringVar(value="10")
+    self.debug_auto_gauntlet_running = False
+    self.debug_auto_gauntlet_remaining = 0
 
     self.icon_images = {}
     self.character_portrait_images = {}
@@ -135,6 +154,7 @@ class BuildSlotMachineApp:
     self.spin_final_fake_max_delay_ms = 1800
     self.final_flash_count = 16
     self.final_flash_delay_ms = 150
+    self.debug_auto_gauntlet_speed_multiplier = 0.25
     self.spin_slot_frame_colors = [
       "#c2185b",
       "#7b1fa2",
@@ -532,7 +552,7 @@ class BuildSlotMachineApp:
       "include_character_checkbox", "include_item_checkbox", "include_offering_checkbox",
       "save_builds_checkbox", "gauntlet_checkbox",
       "debug_character_label", "debug_item_label", "debug_addon_1_label",
-      "debug_addon_2_label", "debug_offering_label"
+      "debug_addon_2_label", "debug_offering_label", "debug_gauntlet_spin_label"
     ):
       if hasattr(self, widget_name):
         getattr(self, widget_name).config(font=("Arial", self.scaled_font(12, 8), "bold"))
@@ -830,7 +850,29 @@ class BuildSlotMachineApp:
       self.on_debug_offering_changed,
       4
     )
+    self.debug_gauntlet_spin_label = tk.Label(
+      self.debug_frame,
+      text="Auto Gauntlet Spins:",
+      font=("Arial", 10, "bold"),
+      bg=BG_COLOR,
+      fg="white"
+    )
+    self.debug_gauntlet_spin_label.grid(row=1, column=0, padx=(5, 2), pady=4, sticky="e")
 
+    self.debug_gauntlet_spin_entry = tk.Entry(
+      self.debug_frame,
+      textvariable=self.debug_gauntlet_spin_count,
+      width=8
+    )
+    self.debug_gauntlet_spin_entry.grid(row=1, column=1, padx=(0, 5), pady=4, sticky="w")
+
+    self.debug_auto_gauntlet_button = tk.Button(
+      self.debug_frame,
+      text="Run Auto Gauntlet Successes",
+      font=("Arial", 10, "bold"),
+      command=self.start_debug_auto_gauntlet
+    )
+    self.debug_auto_gauntlet_button.grid(row=1, column=2, columnspan=4, padx=5, pady=4, sticky="w")
     self.update_debug_dropdowns(reset_invalid=True)
 
   def create_debug_dropdown(self, parent, label_text, variable, command, column):
@@ -1260,7 +1302,7 @@ class BuildSlotMachineApp:
       flash_color = "#ffd700" if flash_index % 2 == 0 else "#ffffff"
       self.set_result_slot_frame_color(flash_color)
       job = self.root.after(
-        self.final_flash_delay_ms,
+        self.get_animation_delay(self.final_flash_delay_ms),
         lambda: self.flash_final_slot_frames(on_complete, flash_index + 1)
       )
       self.spin_animation_jobs.append(job)
@@ -1294,6 +1336,8 @@ class BuildSlotMachineApp:
       "debug_addon_1_menu",
       "debug_addon_2_menu",
       "debug_offering_menu",
+      "debug_gauntlet_spin_entry",
+      "debug_auto_gauntlet_button",
     ]
 
     widgets = []
@@ -1636,15 +1680,23 @@ class BuildSlotMachineApp:
     self.display_perks(random_perks)
     self.display_extra_roll(role, extra_character if role == "Killer" else random_character, random_extra_roll)
 
+  def get_animation_delay(self, delay_ms):
+    if self.debug_mode and self.debug_auto_gauntlet_running:
+      return max(1, int(delay_ms * self.debug_auto_gauntlet_speed_multiplier))
+
+    return delay_ms
+  
   def get_spin_frame_delay(self, frame_index):
     slow_start = max(0, self.spin_frame_count - self.spin_slow_frame_count)
 
     if frame_index < slow_start:
-      return self.spin_frame_delay_ms + int(frame_index * 3)
+      delay = self.spin_frame_delay_ms + int(frame_index * 3)
+    else:
+      slow_index = frame_index - slow_start
+      slow_delays = [160, 260, 400, 620, 850]
+      delay = slow_delays[min(slow_index, len(slow_delays) - 1)]
 
-    slow_index = frame_index - slow_start
-    slow_delays = [160, 260, 400, 620, 850]
-    return slow_delays[min(slow_index, len(slow_delays) - 1)]
+    return self.get_animation_delay(delay)
 
   def animate_build_result(self, role, final_character, final_perks, final_extra_roll, on_complete):
     self.cancel_spin_animations()
@@ -1666,9 +1718,11 @@ class BuildSlotMachineApp:
       # slot-machine pause before the real selected build appears.
       self.display_spin_frame(role, perk_count)
       self.update_spin_slot_frame_color(self.spin_frame_count)
-      final_fake_delay = random.randint(
-        self.spin_final_fake_min_delay_ms,
-        self.spin_final_fake_max_delay_ms
+      final_fake_delay = self.get_animation_delay(
+        random.randint(
+          self.spin_final_fake_min_delay_ms,
+          self.spin_final_fake_max_delay_ms
+        )
       )
       job = self.root.after(final_fake_delay, reveal_final_result)
       self.spin_animation_jobs.append(job)
@@ -1685,6 +1739,77 @@ class BuildSlotMachineApp:
       show_final_fake_frame()
 
     run_frame()
+
+  def start_debug_auto_gauntlet(self):
+    if not self.debug_mode:
+      return
+
+    if self.debug_auto_gauntlet_running:
+      return
+
+    try:
+      spin_count = int(self.debug_gauntlet_spin_count.get())
+    except ValueError:
+      messagebox.showerror("Debug Auto Gauntlet", "Enter a whole number of spins.")
+      return
+
+    if spin_count <= 0:
+      messagebox.showerror("Debug Auto Gauntlet", "Enter a spin count greater than 0.")
+      return
+
+    if not self.gauntlet_enabled.get():
+      self.gauntlet_enabled.set(True)
+      self.update_gauntlet_controls()
+
+    self.debug_auto_gauntlet_running = True
+    self.debug_auto_gauntlet_remaining = spin_count
+    self.result_label.config(text=f"Debug auto gauntlet started: {spin_count} successes queued.")
+    self.run_next_debug_auto_gauntlet_spin()
+
+  def run_next_debug_auto_gauntlet_spin(self):
+    if not self.debug_auto_gauntlet_running:
+      return
+
+    if self.debug_auto_gauntlet_remaining <= 0:
+      self.debug_auto_gauntlet_running = False
+      self.result_label.config(text="Debug auto gauntlet complete.")
+      self.update_gauntlet_controls()
+      return
+
+    if self.is_spinning:
+      self.root.after(
+        self.get_animation_delay(250),
+        self.run_next_debug_auto_gauntlet_spin
+      )
+      return
+
+    if len(self.get_available_characters_for_roll()) == 0:
+      self.debug_auto_gauntlet_running = False
+      self.result_label.config(text=f"Debug auto gauntlet stopped: all {self.current_role.lower()}s are safe.")
+      self.update_gauntlet_controls()
+      return
+
+    self.randomize_build()
+
+  def finish_debug_auto_gauntlet_spin(self):
+    if not self.debug_auto_gauntlet_running:
+      return
+
+    role = self.current_role
+    last_roll = self.last_rolls.get(role)
+
+    if last_roll is None or last_roll.get("character") is None:
+      self.debug_auto_gauntlet_running = False
+      self.result_label.config(text="Debug auto gauntlet stopped: no character was rolled.")
+      self.update_gauntlet_controls()
+      return
+
+    self.record_gauntlet_success()
+    self.debug_auto_gauntlet_remaining -= 1
+    self.root.after(
+      self.get_animation_delay(350),
+      self.run_next_debug_auto_gauntlet_spin
+    )
 
   def randomize_build(self):
     if self.is_spinning:
@@ -1729,12 +1854,21 @@ class BuildSlotMachineApp:
       self.history_store.record_build(role, build_data)
 
     def finish_randomize():
+      if self.gauntlet_enabled.get() and chosen_character is not None:
+        self.gauntlet_result_pending[role] = True
+
       self.update_gauntlet_controls()
 
       if chosen_character is None:
         self.result_label.config(text=f"Your random {role} perk build is ready!")
       else:
         self.result_label.config(text=f"Your random {role} build is ready!")
+      
+      if self.debug_auto_gauntlet_running:
+        self.root.after(
+          self.get_animation_delay(350),
+          self.finish_debug_auto_gauntlet_spin
+        )
 
     self.animate_build_result(role, chosen_character, chosen_perks, extra_roll, finish_randomize)
 
@@ -1951,9 +2085,10 @@ class BuildSlotMachineApp:
 
     canvas.bind("<Button-1>", lambda event: fireworks_window.destroy())
     fireworks_window.after(250, animate_fireworks)
-    fireworks_window.after(4500, lambda: fireworks_window.winfo_exists() and fireworks_window.destroy())
+    fireworks_window.after(6000, lambda: fireworks_window.winfo_exists() and fireworks_window.destroy())
 
   def update_gauntlet_streak_label(self):
+    role = self.current_role
     if not hasattr(self, "gauntlet_streak_label"):
       return
 
@@ -1967,18 +2102,36 @@ class BuildSlotMachineApp:
 
     survivor_safe = len(survivor_state["safe_characters"])
     survivor_checkpoint = survivor_state["checkpoint_count"]
-    survivor_streak = survivor_safe - survivor_checkpoint
+    survivor_streak = self.gauntlet_stats["Survivor"]["current_streak"]
+    survivor_max_streak = self.gauntlet_stats["Survivor"]["max_streak"]
+    survivor_failure_count = self.gauntlet_stats["Survivor"]["failure_count"]
 
     killer_safe = len(killer_state["safe_characters"])
     killer_checkpoint = killer_state["checkpoint_count"]
-    killer_streak = killer_safe - killer_checkpoint
+    killer_streak = self.gauntlet_stats["Killer"]["current_streak"]
+    killer_max_streak = self.gauntlet_stats["Killer"]["max_streak"]
+    killer_failure_count = self.gauntlet_stats["Killer"]["failure_count"]
 
-    self.gauntlet_streak_label.config(
-      text=(
-        f"Survivor Streak: {survivor_streak} | Safe: {survivor_safe} | Checkpoint: {survivor_checkpoint}    "
-        f"Killer Streak: {killer_streak} | Safe: {killer_safe} | Checkpoint: {killer_checkpoint}"
+    if role == "Killer":
+      self.gauntlet_streak_label.config(
+        text=(
+          f"Killer Streak: {killer_streak} | "
+          f"Max Streak: {killer_max_streak} | "
+          f"Fails: {killer_failure_count} | "
+          f"Safe: {killer_safe} | "
+          f"Checkpoint: {killer_checkpoint}"
+        )
       )
-    )
+    else:
+      self.gauntlet_streak_label.config(
+        text=(
+          f"Survivor Streak: {survivor_streak} | "
+          f"Max Streak: {survivor_max_streak} | "
+          f"Fails: {survivor_failure_count} | "
+          f"Safe: {survivor_safe} | "
+          f"Checkpoint: {survivor_checkpoint}"
+        )
+      )
 
     if not self.gauntlet_streak_label.winfo_ismapped():
       self.gauntlet_streak_label.pack(pady=1)
@@ -2062,6 +2215,22 @@ class BuildSlotMachineApp:
     if not self.gauntlet_played_frame.winfo_ismapped():
       self.gauntlet_played_frame.pack(pady=1)
 
+  def apply_gauntlet_pending_button_locks(self):
+    if not hasattr(self, "randomize_button"):
+      return
+
+    role = self.current_role
+    should_lock = self.gauntlet_enabled.get() and self.gauntlet_result_pending.get(role, False)
+    button_state = "disabled" if should_lock else "normal"
+
+    self.randomize_button.config(state=button_state)
+
+    if role == "Survivor" and hasattr(self, "load_survivor_build_button"):
+      self.load_survivor_build_button.config(state=button_state)
+
+    if role == "Killer" and hasattr(self, "load_killer_build_button"):
+      self.load_killer_build_button.config(state=button_state)
+
   def update_saved_build_button_visibility(self):
     if not hasattr(self, "load_survivor_build_button") or not hasattr(self, "load_killer_build_button"):
       return
@@ -2076,6 +2245,8 @@ class BuildSlotMachineApp:
     else:
       self.load_survivor_build_button.pack(side="left", padx=3)
 
+    self.apply_gauntlet_pending_button_locks()
+
   def update_gauntlet_controls(self):
     if not hasattr(self, "gauntlet_result_frame"):
       return
@@ -2084,9 +2255,11 @@ class BuildSlotMachineApp:
     self.update_gauntlet_played_display()
 
     if not self.gauntlet_enabled.get():
+      self.gauntlet_result_pending[self.current_role] = False
       self.gauntlet_result_frame.pack_forget()
       if hasattr(self, "gauntlet_clear_frame"):
         self.gauntlet_clear_frame.pack_forget()
+      self.apply_gauntlet_pending_button_locks()
       return
 
     if not self.gauntlet_result_frame.winfo_ismapped():
@@ -2115,6 +2288,7 @@ class BuildSlotMachineApp:
     button_state = "normal" if has_character and not character_already_safe else "disabled"
     self.gauntlet_success_button.config(state=button_state)
     self.gauntlet_failure_button.config(state=button_state)
+    self.apply_gauntlet_pending_button_locks()
 
   def clear_current_gauntlet(self):
     role = self.current_role
@@ -2128,6 +2302,10 @@ class BuildSlotMachineApp:
       return
 
     self.history_store.clear_gauntlet(role)
+    self.gauntlet_stats[role]["current_streak"] = 0
+    self.gauntlet_stats[role]["max_streak"] = 0
+    self.gauntlet_stats[role]["failure_count"] = 0
+    self.gauntlet_result_pending[role] = False
     self.result_label.config(text=f"{role} gauntlet progress cleared.")
     self.update_gauntlet_controls()
 
@@ -2143,6 +2321,11 @@ class BuildSlotMachineApp:
     safe_count = self.history_store.record_gauntlet_success(role, character_name, result)
     total_characters = len(self.killer_characters if role == "Killer" else self.survivor_characters)
 
+    self.gauntlet_stats[role]["current_streak"] += 1
+
+    if self.gauntlet_stats[role]["current_streak"] > self.gauntlet_stats[role]["max_streak"]:
+      self.gauntlet_stats[role]["max_streak"] = self.gauntlet_stats[role]["current_streak"]
+    
     if safe_count >= total_characters and total_characters > 0:
       self.result_label.config(text=f"{role} gauntlet complete! Every {role.lower()} is safe!")
       self.show_gauntlet_complete_fireworks(role)
@@ -2151,6 +2334,7 @@ class BuildSlotMachineApp:
 
     self.gauntlet_success_button.config(state="disabled")
     self.gauntlet_failure_button.config(state="disabled")
+    self.gauntlet_result_pending[role] = False
     self.update_gauntlet_controls()
 
   def record_gauntlet_failure(self):
@@ -2161,7 +2345,7 @@ class BuildSlotMachineApp:
       return
 
     character_name = last_roll["character"]["name"]
-    result = "0-3K" if role == "Killer" else "Died"
+    result = "0-3K" if role == "Killer" else "Death"
     checkpoint_count = self.history_store.get_gauntlet_state(role)["checkpoint_count"]
 
     messagebox.showwarning(
@@ -2169,8 +2353,12 @@ class BuildSlotMachineApp:
       f"{result} recorded for {character_name}. Your {role} gauntlet save will be reset to the most recent checkpoint: {checkpoint_count} safe characters."
     )
 
+    self.gauntlet_stats[role]["failure_count"] += 1
+    self.gauntlet_stats[role]["current_streak"] = 0
+    
     reset_count = self.history_store.record_gauntlet_failure_reset(role, character_name, result)
     self.result_label.config(text=f"{role} gauntlet reset to checkpoint: {reset_count} safe characters.")
     self.gauntlet_success_button.config(state="disabled")
     self.gauntlet_failure_button.config(state="disabled")
+    self.gauntlet_result_pending[role] = False
     self.update_gauntlet_controls()
