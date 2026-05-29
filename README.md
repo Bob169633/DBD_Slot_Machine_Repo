@@ -23,12 +23,14 @@
 - Background DVD-logo-esque animation of character portraits
 - Slot icon borders flash gold and white when final build is selected
 
-## Building `spinthewheel.exe` with the portable packager
+## Building `spinthewheel.exe`
 
-1. Copy the file path from Windows Explorer (Control + Shift + C)
-2. Open command prompt (Win + R, type cmd, hit enter)
-3. type cd then paste what you just copied
-4. type .\portable_python\python.exe packager.py spinthewheel.py
+1. Visit my other repo, https://github.com/Bob169633/portable_python to download the portable python install
+2. Unzip the portable python install to the same folder you extracted this repository to
+3. Copy the file path from Windows Explorer (Control + Shift + C)
+4. Open command prompt (Win + R, type cmd, hit enter)
+5. type cd then paste what you just copied
+6. type .\portable_python\python.exe .\portable_python\packager.py spinthewheel.py
 
 ## Note
 This also searches for local Python installs
