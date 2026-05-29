@@ -26,7 +26,7 @@
 ## Building `spinthewheel.exe`
 
 1. Visit my other repo, https://github.com/Bob169633/portable_python to download the portable python install
-2. If you already have python installed, you can instead only download packager.py
+2. If you already have python installed, you can instead only download packager.py from the portable_python repo
 3. Unzip the portable python install to the same folder you extracted this repository to
 4. Copy the file path from Windows Explorer (Control + Shift + C)
 5. Open command prompt (Win + R, type cmd, hit enter)
