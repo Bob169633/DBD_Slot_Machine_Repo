@@ -1,6 +1,6 @@
 dist/spinthewheel.exe
-killer_build_history.csv
-survivor_build_history.csv
+killer_saves.csv
+survivor_saves.csv
 __pycache__/api_client.cpython-313.pyc
 __pycache__/app.cpython-313.pyc
 __pycache__/theme.cpython-313.pyc
