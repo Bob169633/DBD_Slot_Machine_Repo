@@ -32,6 +32,14 @@ SURVIVOR_ONLY_OFFERING_OPTION_NAMES = (
   "Luck",
 )
 
+KILLER_ONLY_OFFERING_OPTION_NAMES = (
+  "Mori",
+)
+
+OFFERING_EXACT_ICON_FILES = {
+  "Ebony Memento Mori": "iconFavors_mementoMoriEbony.png"
+}
+
 OFFERING_ICON_NAME_BY_ROLE = {
   "Survivor": {
     "Basement": "Bloodied Blueprint",
@@ -52,7 +60,8 @@ OFFERING_ICON_NAME_BY_ROLE = {
     "Fog": "Murky Reagent",
     "Coin": "Cut Coin",
     "Realm": "MacMillan's Phalanx Bone",
-    "Shroud": "Shroud of Separation"
+    "Shroud": "Shroud of Separation",
+    "Mori": "Ebony Memento Mori"
   }
 }
 

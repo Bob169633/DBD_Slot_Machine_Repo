@@ -5,6 +5,7 @@ from killer_addon_map import get_manual_killer_addons
 from config import (
   KILLER_ADDON_EXACT_POWER_BY_ADDON,
   KILLER_ADDON_OWNER_ALIASES,
+  KILLER_ONLY_OFFERING_OPTION_NAMES,
   KILLER_POWER_BY_KILLER,
   OFFERING_ICON_NAME_BY_ROLE,
   OFFERING_OPTION_NAMES,
@@ -113,6 +114,8 @@ def get_offering_options_for_role(role):
 
   if role == "Survivor":
     option_names.extend(SURVIVOR_ONLY_OFFERING_OPTION_NAMES)
+  elif role == "Killer":
+    option_names.extend(KILLER_ONLY_OFFERING_OPTION_NAMES)
 
   return [
     {

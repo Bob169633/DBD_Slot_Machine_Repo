@@ -14,7 +14,8 @@ CSV_COLUMNS = (
   "result",
   "safe_count",
   "safe_characters",
-  "build_json"
+  "build_json",
+  "data_json"
 )
 
 class BuildHistoryStore:
@@ -22,7 +23,7 @@ class BuildHistoryStore:
     self.base_folder = base_folder or os.path.dirname(os.path.abspath(__file__))
 
   def get_csv_path(self, role):
-    file_name = f"{role.lower()}_build_history.csv"
+    file_name = "survivor_saves.csv" if role == "Survivor" else "killer_saves.csv"
     return os.path.join(self.base_folder, file_name)
 
   def ensure_csv_exists(self, role):
@@ -35,9 +36,10 @@ class BuildHistoryStore:
 
     return csv_path
 
-  def append_event(self, role, event, character="", result="", safe_characters=None, build_data=None):
+  def append_event(self, role, event, character="", result="", safe_characters=None, build_data=None, data=None):
     safe_characters = sorted(safe_characters or [])
     build_data = build_data or {}
+    data = data or {}
     csv_path = self.ensure_csv_exists(role)
 
     row = {
@@ -48,7 +50,8 @@ class BuildHistoryStore:
       "result": result or "",
       "safe_count": len(safe_characters),
       "safe_characters": json.dumps(safe_characters, ensure_ascii=False),
-      "build_json": json.dumps(build_data, ensure_ascii=False)
+      "build_json": json.dumps(build_data, ensure_ascii=False),
+      "data_json": json.dumps(data, ensure_ascii=False) if data else ""
     }
 
     with open(csv_path, "a", newline="", encoding="utf-8") as csv_file:
@@ -255,6 +258,86 @@ class BuildHistoryStore:
 
     return len(checkpoint_characters)
 
+  def record_gauntlet_trophy(self, role, trophy_data):
+    self.append_event(
+      role,
+      "gauntlet_trophy",
+      result="Complete",
+      safe_characters=[],
+      data=trophy_data
+    )
+
+  def get_gauntlet_trophies(self, role):
+    trophies = []
+
+    for row in self.read_events(role):
+      if row.get("event") != "gauntlet_trophy":
+        continue
+
+      trophy_data = self.parse_json_dict(row.get("data_json", "{}"))
+
+      if not trophy_data:
+        continue
+
+      trophies.append({
+        "timestamp": row.get("timestamp", ""),
+        "role": role,
+        "max_streak": self.safe_int(trophy_data.get("max_streak", 0)),
+        "failure_count": self.safe_int(trophy_data.get("failure_count", 0)),
+        "total_characters_played": self.safe_int(trophy_data.get("total_characters_played", 0)),
+        "final_streak": self.safe_int(trophy_data.get("final_streak", 0))
+      })
+
+    return sorted(
+      trophies,
+      key=lambda trophy: (
+        trophy["total_characters_played"],
+        -trophy["max_streak"],
+        trophy["failure_count"]
+      )
+    )
+
+
+  def save_gauntlet_stats(self, role, stats):
+    self.append_event(
+      role,
+      "gauntlet_stats",
+      result="Stats saved",
+      safe_characters=self.get_safe_character_names(role),
+      data={
+        "current_streak": self.safe_int(stats.get("current_streak", 0)),
+        "max_streak": self.safe_int(stats.get("max_streak", 0)),
+        "failure_count": self.safe_int(stats.get("failure_count", 0)),
+        "total_characters_played": self.safe_int(stats.get("total_characters_played", 0))
+      }
+    )
+
+  def load_gauntlet_stats(self, role):
+    latest_stats = {
+      "current_streak": 0,
+      "max_streak": 0,
+      "failure_count": 0,
+      "total_characters_played": 0
+    }
+
+    for row in self.read_events(role):
+      if row.get("event") != "gauntlet_stats":
+        continue
+
+      stats_data = self.parse_json_dict(row.get("data_json", "{}"))
+
+      if not stats_data:
+        continue
+
+      latest_stats = {
+        "current_streak": self.safe_int(stats_data.get("current_streak", 0)),
+        "max_streak": self.safe_int(stats_data.get("max_streak", 0)),
+        "failure_count": self.safe_int(stats_data.get("failure_count", 0)),
+        "total_characters_played": self.safe_int(stats_data.get("total_characters_played", 0))
+      }
+
+    return latest_stats
+
   def serialize_build(self, role, character, perks, extra_roll):
     addons = extra_roll.get("addons", []) if extra_roll else []
     item = extra_roll.get("item") if extra_roll else None
@@ -278,6 +361,13 @@ class BuildHistoryStore:
       return value.get("name", "")
 
     return str(value)
+
+  @staticmethod
+  def safe_int(value):
+    try:
+      return int(value)
+    except (TypeError, ValueError):
+      return 0
 
   @staticmethod
   def parse_json_list(value):

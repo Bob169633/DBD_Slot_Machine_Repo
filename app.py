@@ -1,7 +1,9 @@
 import math
 import os
 import random
+import sys
 import tkinter as tk
+import tkinter.font as tkfont
 from tkinter import messagebox
 
 from PIL import Image, ImageTk
@@ -35,6 +37,14 @@ from icon_utils import (
 )
 from normalization import normalize_icon_search_text
 from theme import apply_dark_theme, reset_image_label
+
+
+def app_folder():
+  if getattr(sys, "frozen", False):
+    return os.path.dirname(sys.executable)
+
+  return os.path.dirname(os.path.abspath(__file__))
+from unlock_characters import CharacterUnlockStore, open_unlock_characters_window
 
 class BuildSlotMachineApp:
   def __init__(
@@ -88,17 +98,14 @@ class BuildSlotMachineApp:
 
     self.last_rolls = {"Survivor": None, "Killer": None}
     self.history_store = BuildHistoryStore()
+    self.unlock_store = CharacterUnlockStore()
+    self.unlocked_characters = {
+      "Survivor": self.unlock_store.get_unlocked_character_names("Survivor", self.survivor_characters),
+      "Killer": self.unlock_store.get_unlocked_character_names("Killer", self.killer_characters)
+    }
     self.gauntlet_stats = {
-      "Survivor": {
-        "current_streak": 0,
-        "max_streak": 0,
-        "failure_count": 0
-      },
-      "Killer": {
-        "current_streak": 0,
-        "max_streak": 0,
-        "failure_count": 0
-      }
+      "Survivor": self.history_store.load_gauntlet_stats("Survivor"),
+      "Killer": self.history_store.load_gauntlet_stats("Killer")
     }
     self.gauntlet_result_pending = {
       "Survivor": False,
@@ -127,6 +134,16 @@ class BuildSlotMachineApp:
     self.addon_images = {}
     self.offering_images = {}
     self.power_images = {}
+    self.trophy_images = {}
+    self.trophy_tooltip_window = None
+    self.gauntlet_played_tiles = {}
+    self.gauntlet_played_current_names = []
+    self.gauntlet_played_refresh_job = None
+    self.gauntlet_played_build_index = 0
+    self.gauntlet_played_build_names = []
+    self.gauntlet_played_portrait_cache = {}
+    self.gauntlet_played_tiles_per_frame = 4
+    self.gauntlet_played_last_signature = None
     self.background_images = []
     self.background_items = []
     self.background_animation_job = None
@@ -208,7 +225,8 @@ class BuildSlotMachineApp:
       self.root,
       bg=BG_COLOR,
       highlightthickness=0,
-      borderwidth=0
+      borderwidth=0,
+      relief="flat"
     )
     self.background_canvas.place(x=0, y=0, relwidth=1, relheight=1)
     self.lower_background_canvas()
@@ -494,6 +512,195 @@ class BuildSlotMachineApp:
   def scaled_font(self, size, minimum=7):
     return max(minimum, int(round(size * self.ui_scale)))
 
+  def get_sidebar_scale(self):
+    window_width = max(900, self.root.winfo_width())
+    window_height = max(700, self.root.winfo_height())
+    width_scale = window_width / 1600
+    height_scale = window_height / 1200
+    return max(0.65, min(1.35, min(width_scale, height_scale)))
+
+  def sidebar_scaled(self, value, minimum=None, maximum=None):
+    scaled_value = int(round(value * self.get_sidebar_scale()))
+
+    if minimum is not None:
+      scaled_value = max(minimum, scaled_value)
+
+    if maximum is not None:
+      scaled_value = min(maximum, scaled_value)
+
+    return scaled_value
+
+  def get_safe_character_sidebar_width(self, safe_character_names=None):
+    if safe_character_names is None:
+      safe_count = len(getattr(self, "gauntlet_played_current_names", []))
+    else:
+      safe_count = len(safe_character_names)
+
+    window_width = max(900, self.root.winfo_width())
+    window_height = max(700, self.root.winfo_height())
+
+    width_scale = window_width / 1600
+    height_scale = window_height / 1200
+    raw_proportion = max(0.65, min(1.25, min(width_scale, height_scale)))
+
+    max_rows_per_column = self.gauntlet_played_max_rows_per_column
+    column_count = max(1, math.ceil(safe_count / max_rows_per_column))
+
+    left_padding = 5
+    icon_width = 68
+    right_padding = 5
+    outside_padding = 24
+    base_column_width = left_padding + icon_width + right_padding
+
+    max_allowed_width = self.get_safe_character_max_allowed_width()
+    required_width_at_raw_scale = int(
+      (column_count * base_column_width * raw_proportion) +
+      (outside_padding * raw_proportion * 2)
+    )
+
+    effective_proportion = raw_proportion
+
+    if required_width_at_raw_scale > max_allowed_width:
+      available_for_columns = max_allowed_width - int(outside_padding * raw_proportion * 2)
+      effective_proportion = available_for_columns / max(1, column_count * base_column_width)
+      effective_proportion = max(0.42, min(raw_proportion, effective_proportion))
+
+    title_font_size = max(7, int(10 * effective_proportion))
+    empty_font_size = max(6, int(7 * effective_proportion))
+
+    title_font = tkfont.Font(
+      family="Arial",
+      size=title_font_size,
+      weight="bold"
+    )
+    empty_font = tkfont.Font(
+      family="Arial",
+      size=empty_font_size
+    )
+
+    role_word = "killers" if self.current_role == "Killer" else "survivors"
+
+    title_width = title_font.measure("Safe Characters") + int(outside_padding * effective_proportion * 2)
+    empty_width = empty_font.measure(f"No {role_word} played yet") + int(outside_padding * effective_proportion * 2)
+    calculated_character_width = int(
+      (column_count * base_column_width * effective_proportion) +
+      (outside_padding * effective_proportion * 2)
+    )
+
+    minimum_width = max(
+      int(145 * effective_proportion),
+      title_width,
+      empty_width
+    )
+
+    return min(
+      max_allowed_width,
+      max(minimum_width, calculated_character_width)
+    )
+
+  def get_safe_character_max_allowed_width(self):
+    window_width = max(900, self.root.winfo_width())
+
+    trophy_width = 0
+
+    if hasattr(self, "trophy_sidebar_frame") and self.trophy_sidebar_frame.winfo_ismapped():
+      trophy_width = max(
+        self.trophy_sidebar_frame.winfo_width(),
+        self.sidebar_scaled(240, 180, 345)
+      )
+
+    main_min_width = self.sidebar_scaled(760, 620, 980)
+    horizontal_padding = self.sidebar_scaled(70, 45, 100)
+
+    calculated_limit = window_width - trophy_width - main_min_width - horizontal_padding
+    fallback_limit = int(window_width * 0.26)
+
+    return max(
+      self.sidebar_scaled(145, 115, 190),
+      min(fallback_limit, calculated_limit if calculated_limit > 0 else fallback_limit)
+    )
+
+  def get_safe_character_effective_scale(self, safe_character_names=None):
+    if safe_character_names is None:
+      safe_count = len(getattr(self, "gauntlet_played_current_names", []))
+    else:
+      safe_count = len(safe_character_names)
+
+    window_width = max(900, self.root.winfo_width())
+    window_height = max(700, self.root.winfo_height())
+
+    width_scale = window_width / 1600
+    height_scale = window_height / 1200
+    raw_proportion = max(0.65, min(1.25, min(width_scale, height_scale)))
+
+    max_rows_per_column = self.gauntlet_played_max_rows_per_column
+    column_count = max(1, math.ceil(safe_count / max_rows_per_column))
+
+    left_padding = 5
+    icon_width = 68
+    right_padding = 5
+    outside_padding = 24
+    base_column_width = left_padding + icon_width + right_padding
+
+    max_allowed_width = self.get_safe_character_max_allowed_width()
+    required_width_at_raw_scale = (
+      column_count * base_column_width * raw_proportion
+    ) + (outside_padding * raw_proportion * 2)
+
+    if required_width_at_raw_scale <= max_allowed_width:
+      return raw_proportion
+
+    available_for_columns = max_allowed_width - int(outside_padding * raw_proportion * 2)
+    effective_proportion = available_for_columns / max(1, column_count * base_column_width)
+
+    return max(0.42, min(raw_proportion, effective_proportion))
+
+  def update_safe_character_sidebar_width(self, safe_character_names=None):
+    if not hasattr(self, "gauntlet_sidebar_frame"):
+      return
+
+    if not self.gauntlet_enabled.get():
+      self.gauntlet_sidebar_frame.config(width=0)
+      if self.gauntlet_sidebar_frame.winfo_ismapped():
+        self.gauntlet_sidebar_frame.place_configure(width=0)
+      return
+
+    sidebar_width = self.get_safe_character_sidebar_width(safe_character_names)
+    sidebar_height = max(
+      self.sidebar_scaled(520, 420, 900),
+      int(self.root.winfo_height() * 0.82)
+    )
+
+    self.gauntlet_sidebar_frame.config(width=sidebar_width, height=sidebar_height)
+
+    if self.gauntlet_sidebar_frame.winfo_ismapped():
+      self.gauntlet_sidebar_frame.place_configure(
+        x=6,
+        y=6,
+        width=sidebar_width,
+        height=sidebar_height
+      )
+
+    if hasattr(self, "gauntlet_played_frame"):
+      self.gauntlet_played_frame.config(width=sidebar_width, height=sidebar_height)
+
+    if hasattr(self, "gauntlet_played_icon_frame"):
+      self.gauntlet_played_icon_frame.config(width=sidebar_width)
+
+    if hasattr(self, "gauntlet_played_title_label"):
+      safe_scale = self.get_safe_character_effective_scale(safe_character_names)
+      self.gauntlet_played_title_label.config(
+        wraplength=max(
+          80,
+          sidebar_width - int(24 * safe_scale)
+        )
+      )
+
+    try:
+      self.gauntlet_sidebar_frame.update_idletasks()
+    except tk.TclError:
+      pass
+
   def apply_responsive_layout(self, force=False):
     self.resize_job = None
     new_scale = self.get_responsive_scale()
@@ -565,11 +772,76 @@ class BuildSlotMachineApp:
       self.clear_gauntlet_button.config(font=("Arial", self.scaled_font(11, 8), "bold"), width=max(15, self.scaled(18, 15)))
       self.load_survivor_build_button.config(font=("Arial", self.scaled_font(10, 8), "bold"), width=max(11, self.scaled(14, 11)))
       self.load_killer_build_button.config(font=("Arial", self.scaled_font(10, 8), "bold"), width=max(11, self.scaled(14, 11)))
+      if hasattr(self, "unlock_characters_button"):
+        self.unlock_characters_button.config(font=("Arial", self.scaled_font(12, 8), "bold"), width=max(14, self.scaled(18, 14)))
       self.gauntlet_streak_label.config(font=("Arial", self.scaled_font(10, 8), "bold"))
-      self.gauntlet_played_title_label.config(font=("Arial", self.scaled_font(9, 8), "bold"))
+      sidebar_width = self.get_safe_character_sidebar_width(
+        getattr(self, "gauntlet_played_current_names", [])
+      )
+      self.gauntlet_played_title_label.config(
+        font=("Arial", self.sidebar_scaled(10, 8, 13), "bold"),
+        wraplength=max(
+          100,
+          sidebar_width - self.sidebar_scaled(24, 14, 40)
+        )
+      )
+
+    if hasattr(self, "gauntlet_sidebar_frame"):
+      sidebar_names = getattr(self, "gauntlet_played_current_names", [])
+      sidebar_width = self.get_safe_character_sidebar_width(sidebar_names)
+
+      gauntlet_sidebar_height = max(
+        self.sidebar_scaled(520, 420, 950),
+        int(self.root.winfo_height() * 0.82)
+      )
+
+      self.gauntlet_sidebar_frame.config(
+        width=sidebar_width,
+        height=gauntlet_sidebar_height
+      )
+
+      if self.gauntlet_enabled.get() and self.gauntlet_sidebar_frame.winfo_ismapped():
+        self.gauntlet_sidebar_frame.place_configure(
+          x=6,
+          y=6,
+          width=sidebar_width,
+          height=gauntlet_sidebar_height
+        )
+
+      if hasattr(self, "gauntlet_played_frame"):
+        self.gauntlet_played_frame.config(width=sidebar_width)
+
+      if hasattr(self, "gauntlet_played_icon_frame"):
+        self.gauntlet_played_icon_frame.config(width=sidebar_width)
+
+      self.update_safe_character_sidebar_width(sidebar_names)
+
+      if self.gauntlet_enabled.get() and self.gauntlet_sidebar_frame.winfo_ismapped():
+        self.update_gauntlet_sidebar_visibility()
+
+    if hasattr(self, "trophy_sidebar_frame"):
+      trophy_sidebar_height = max(
+        self.sidebar_scaled(620, 500, 1050),
+        int(self.root.winfo_height() * 0.78)
+      )
+      self.trophy_sidebar_frame.config(
+        width=self.sidebar_scaled(240, 180, 345),
+        height=trophy_sidebar_height
+      )
+
+      if self.gauntlet_enabled.get() and self.trophy_sidebar_frame.winfo_ismapped():
+        self.update_trophy_sidebar_visibility()
+
+    if hasattr(self, "trophy_sidebar_title"):
+      self.trophy_sidebar_title.config(font=("Arial", self.sidebar_scaled(16, 11, 22), "bold"))
+      self.trophy_sidebar_role_label.config(font=("Arial", self.sidebar_scaled(11, 8, 15), "bold"))
 
     self.refresh_scaled_images()
-    self.update_gauntlet_played_display()
+
+
+    if hasattr(self, "trophy_sidebar_inner_frame"):
+      self.update_trophy_case_sidebar()
+
     self.root.after(50, lambda: self.schedule_background_rebuild(clear_now=True))
 
   def refresh_scaled_images(self):
@@ -602,6 +874,7 @@ class BuildSlotMachineApp:
     self.build_slider_controls()
     self.build_debug_controls()
     self.build_randomize_controls()
+    self.build_trophy_case_sidebar()
 
   def build_role_controls(self):
     self.role_frame = tk.Frame(self.root)
@@ -634,6 +907,14 @@ class BuildSlotMachineApp:
     )
     self.killer_role_button.pack(side="left", padx=5)
 
+    self.unlock_characters_button = tk.Button(
+      self.role_frame,
+      text="Unlock Characters",
+      font=("Arial", 12, "bold"),
+      width=18,
+      command=self.open_unlock_characters_picker
+    )
+    self.unlock_characters_button.pack(side="left", padx=(12, 5))
 
     self.lever_label = tk.Label(self.root, text="Lever set to: Survivor", font=("Arial", 13, "bold"))
     self.lever_label.pack(pady=1)
@@ -665,7 +946,7 @@ class BuildSlotMachineApp:
       self.character_slot_container,
       text="???",
       font=("Arial", 13, "bold"),
-      wraplength=200,
+      wraplength=self.sidebar_scaled(200, 120, 260),
       justify="center",
       bg=self.slot_panel_bg_color
     )
@@ -850,6 +1131,7 @@ class BuildSlotMachineApp:
       self.on_debug_offering_changed,
       4
     )
+
     self.debug_gauntlet_spin_label = tk.Label(
       self.debug_frame,
       text="Auto Gauntlet Spins:",
@@ -873,6 +1155,7 @@ class BuildSlotMachineApp:
       command=self.start_debug_auto_gauntlet
     )
     self.debug_auto_gauntlet_button.grid(row=1, column=2, columnspan=4, padx=5, pady=4, sticky="w")
+
     self.update_debug_dropdowns(reset_invalid=True)
 
   def create_debug_dropdown(self, parent, label_text, variable, command, column):
@@ -920,7 +1203,12 @@ class BuildSlotMachineApp:
       return
 
     role = self.current_role
-    character_names = [character["name"] for character in self.get_current_character_list()]
+    unlocked_names = self.unlocked_characters.get(role, set())
+    character_names = [
+      character["name"]
+      for character in self.get_current_character_list()
+      if character["name"] in unlocked_names
+    ]
     self.set_debug_menu_options(
       self.debug_character_menu,
       self.debug_character_choice,
@@ -1126,18 +1414,58 @@ class BuildSlotMachineApp:
 
     self.gauntlet_streak_label = tk.Label(self.root, text="", font=("Arial", 10, "bold"))
 
-    self.gauntlet_played_frame = tk.Frame(self.root)
+    self.gauntlet_sidebar_frame = tk.Frame(
+      self.root,
+      bg=BG_COLOR,
+      width=230,
+      height=900,
+      relief="flat",
+      borderwidth=0,
+      highlightthickness=0
+    )
+    self.gauntlet_sidebar_frame.place_forget()
+    self.gauntlet_sidebar_frame.pack_propagate(False)
+
+    self.gauntlet_played_frame = tk.Frame(
+      self.gauntlet_sidebar_frame,
+      bg=BG_COLOR,
+      relief="flat",
+      borderwidth=0,
+      highlightthickness=0
+    )
+    self.gauntlet_played_frame.pack_propagate(False)
+
     self.gauntlet_played_title_label = tk.Label(
       self.gauntlet_played_frame,
       text="",
-      font=("Arial", 9, "bold")
+      font=("Arial", 10, "bold"),
+      bg=BG_COLOR,
+      fg="white",
+      wraplength=self.sidebar_scaled(200, 120, 260),
+      justify="center"
     )
-    self.gauntlet_played_title_label.pack(pady=(0, 1))
+    self.gauntlet_played_title_label.pack(pady=(8, 4))
 
-    self.gauntlet_played_icon_frame = tk.Frame(self.gauntlet_played_frame, bg=BG_COLOR)
-    self.gauntlet_played_icon_frame.pack()
+    self.gauntlet_played_icon_frame = tk.Frame(
+      self.gauntlet_played_frame,
+      bg=BG_COLOR,
+      relief="flat",
+      borderwidth=0,
+      highlightthickness=0
+    )
+    self.gauntlet_played_icon_frame.pack_propagate(False)
+    self.gauntlet_played_icon_frame.grid_propagate(False)
+    self.gauntlet_played_icon_frame.pack(fill="both", expand=True)
     self.gauntlet_played_icon_images = []
-    self.gauntlet_played_max_columns = 10
+    self.gauntlet_played_tiles = {}
+    self.gauntlet_played_current_names = []
+    self.gauntlet_played_refresh_job = None
+    self.gauntlet_played_build_index = 0
+    self.gauntlet_played_build_names = []
+    self.gauntlet_played_portrait_cache = {}
+    self.gauntlet_played_tiles_per_frame = 4
+    self.gauntlet_played_last_signature = None
+    self.gauntlet_played_max_rows_per_column = 10
 
     self.update_gauntlet_controls()
 
@@ -1184,10 +1512,13 @@ class BuildSlotMachineApp:
     self.current_role = selected_role
     self.load_role_settings(selected_role)
     self.apply_role_slot_labels(selected_role)
+    self.clear_gauntlet_played_tiles()
+    self.gauntlet_played_last_signature = None
     self.restore_last_roll(selected_role)
     self.update_debug_dropdowns(reset_invalid=True)
     self.update_saved_build_button_visibility()
     self.update_gauntlet_controls()
+    self.update_trophy_case_sidebar()
 
   def apply_role_slot_labels(self, role):
     self.lever_label.config(text=f"Lever set to: {role}")
@@ -1331,6 +1662,7 @@ class BuildSlotMachineApp:
       "clear_gauntlet_button",
       "load_survivor_build_button",
       "load_killer_build_button",
+      "unlock_characters_button",
       "debug_character_menu",
       "debug_item_menu",
       "debug_addon_1_menu",
@@ -1388,6 +1720,12 @@ class BuildSlotMachineApp:
 
   def get_available_characters_for_roll(self):
     available_characters = list(self.get_current_character_list())
+    unlocked_names = self.unlocked_characters.get(self.current_role, set())
+
+    available_characters = [
+      character for character in available_characters
+      if character["name"] in unlocked_names
+    ]
 
     if self.gauntlet_enabled.get():
       completed_characters = self.history_store.get_safe_character_names(self.current_role)
@@ -1685,7 +2023,7 @@ class BuildSlotMachineApp:
       return max(1, int(delay_ms * self.debug_auto_gauntlet_speed_multiplier))
 
     return delay_ms
-  
+
   def get_spin_frame_delay(self, frame_index):
     slow_start = max(0, self.spin_frame_count - self.spin_slow_frame_count)
 
@@ -1822,7 +2160,7 @@ class BuildSlotMachineApp:
       self.display_character(None)
       self.clear_slots()
       self.clear_extra_slots()
-      self.result_label.config(text=f"All {role} characters have been cleared in gauntlet mode.")
+      self.result_label.config(text=f"No unlocked {role.lower()} characters are available for this roll.")
       self.update_gauntlet_controls()
       return
 
@@ -1863,7 +2201,7 @@ class BuildSlotMachineApp:
         self.result_label.config(text=f"Your random {role} perk build is ready!")
       else:
         self.result_label.config(text=f"Your random {role} build is ready!")
-      
+
       if self.debug_auto_gauntlet_running:
         self.root.after(
           self.get_animation_delay(350),
@@ -1871,6 +2209,35 @@ class BuildSlotMachineApp:
         )
 
     self.animate_build_result(role, chosen_character, chosen_perks, extra_roll, finish_randomize)
+
+  def open_unlock_characters_picker(self):
+    role = self.current_role
+    characters = self.killer_characters if role == "Killer" else self.survivor_characters
+
+    open_unlock_characters_window(
+      self.root,
+      role,
+      characters,
+      self.character_portrait_files,
+      self.unlocked_characters[role],
+      lambda unlocked_names: self.save_unlocked_characters(role, unlocked_names),
+      icon_size=self.gauntlet_portrait_size
+    )
+
+  def save_unlocked_characters(self, role, unlocked_names):
+    self.unlocked_characters[role] = set(unlocked_names)
+    self.unlock_store.save_unlocked_character_names(role, self.unlocked_characters[role])
+
+    if self.last_rolls.get(role) is not None:
+      last_character = self.last_rolls[role].get("character")
+
+      if last_character is not None and last_character.get("name") not in self.unlocked_characters[role]:
+        self.last_rolls[role] = None
+        self.restore_last_roll(role)
+
+    self.result_label.config(text=f"{role} unlocked character list saved.")
+    self.update_debug_dropdowns(reset_invalid=True)
+    self.update_gauntlet_controls()
 
   def open_saved_build_picker(self, role):
     saved_builds = self.history_store.get_saved_builds(role)
@@ -2085,7 +2452,7 @@ class BuildSlotMachineApp:
 
     canvas.bind("<Button-1>", lambda event: fireworks_window.destroy())
     fireworks_window.after(250, animate_fireworks)
-    fireworks_window.after(6000, lambda: fireworks_window.winfo_exists() and fireworks_window.destroy())
+    fireworks_window.after(4500, lambda: fireworks_window.winfo_exists() and fireworks_window.destroy())
 
   def update_gauntlet_streak_label(self):
     role = self.current_role
@@ -2105,12 +2472,14 @@ class BuildSlotMachineApp:
     survivor_streak = self.gauntlet_stats["Survivor"]["current_streak"]
     survivor_max_streak = self.gauntlet_stats["Survivor"]["max_streak"]
     survivor_failure_count = self.gauntlet_stats["Survivor"]["failure_count"]
+    survivor_total_played = self.gauntlet_stats["Survivor"]["total_characters_played"]
 
     killer_safe = len(killer_state["safe_characters"])
     killer_checkpoint = killer_state["checkpoint_count"]
     killer_streak = self.gauntlet_stats["Killer"]["current_streak"]
     killer_max_streak = self.gauntlet_stats["Killer"]["max_streak"]
     killer_failure_count = self.gauntlet_stats["Killer"]["failure_count"]
+    killer_total_played = self.gauntlet_stats["Killer"]["total_characters_played"]
 
     if role == "Killer":
       self.gauntlet_streak_label.config(
@@ -2118,6 +2487,7 @@ class BuildSlotMachineApp:
           f"Killer Streak: {killer_streak} | "
           f"Max Streak: {killer_max_streak} | "
           f"Fails: {killer_failure_count} | "
+          f"Played: {killer_total_played} | "
           f"Safe: {killer_safe} | "
           f"Checkpoint: {killer_checkpoint}"
         )
@@ -2128,6 +2498,7 @@ class BuildSlotMachineApp:
           f"Survivor Streak: {survivor_streak} | "
           f"Max Streak: {survivor_max_streak} | "
           f"Fails: {survivor_failure_count} | "
+          f"Played: {survivor_total_played} | "
           f"Safe: {survivor_safe} | "
           f"Checkpoint: {survivor_checkpoint}"
         )
@@ -2136,12 +2507,158 @@ class BuildSlotMachineApp:
     if not self.gauntlet_streak_label.winfo_ismapped():
       self.gauntlet_streak_label.pack(pady=1)
 
-  def update_gauntlet_played_display(self):
+  def cancel_gauntlet_played_refresh(self):
+    if getattr(self, "gauntlet_played_refresh_job", None) is None:
+      return
+
+    try:
+      self.root.after_cancel(self.gauntlet_played_refresh_job)
+    except tk.TclError:
+      pass
+
+    self.gauntlet_played_refresh_job = None
+
+  def get_gauntlet_played_portrait_image(self, character_name, portrait_size):
+    cache_key = (character_name, portrait_size)
+
+    if cache_key in self.gauntlet_played_portrait_cache:
+      return self.gauntlet_played_portrait_cache[cache_key]
+
+    portrait_path = self.character_portrait_files.get(character_name)
+
+    if portrait_path is None or not os.path.exists(portrait_path):
+      return None
+
+    try:
+      image = Image.open(portrait_path).resize((portrait_size, portrait_size))
+      portrait_image = ImageTk.PhotoImage(image)
+      self.gauntlet_played_portrait_cache[cache_key] = portrait_image
+      return portrait_image
+    except Exception:
+      return None
+
+  def create_gauntlet_played_tile(self, character_name):
+    safe_scale = self.get_safe_character_effective_scale()
+
+    tile_width = max(42, int(68 * safe_scale))
+    tile_height = max(52, int(83 * safe_scale))
+    portrait_size = max(28, int(43 * safe_scale))
+    name_font_size = max(5, int(6 * safe_scale))
+    name_wraplength = max(38, int(63 * safe_scale))
+
+    character_tile = tk.Frame(
+      self.gauntlet_played_icon_frame,
+      bg=BG_COLOR,
+      width=tile_width,
+      height=tile_height
+    )
+    character_tile.grid_propagate(False)
+
+    portrait_label = tk.Label(character_tile, bg=BG_COLOR)
+    portrait_label.pack(pady=(0, max(1, self.sidebar_scaled(2, 1, 4))))
+
+    portrait_image = self.get_gauntlet_played_portrait_image(character_name, portrait_size)
+
+    if portrait_image is not None:
+      portrait_label.config(image=portrait_image, text="")
+      portrait_label.image = portrait_image
+    else:
+      portrait_label.config(
+        text="No\nPortrait",
+        font=("Arial", max(6, name_font_size), "bold"),
+        width=max(5, int(portrait_size / 8)),
+        height=max(2, int(portrait_size / 13)),
+        fg="white",
+        bg=SLOT_BG_COLOR
+      )
+
+    name_label = tk.Label(
+      character_tile,
+      text=character_name,
+      font=("Arial", name_font_size),
+      wraplength=name_wraplength,
+      justify="center",
+      bg=BG_COLOR,
+      fg="white"
+    )
+    name_label.pack()
+
+    return character_tile
+
+  def reposition_gauntlet_played_tiles(self, safe_character_names, update_width=True):
+    max_rows_per_column = self.gauntlet_played_max_rows_per_column
+    safe_scale = self.get_safe_character_effective_scale(safe_character_names)
+    grid_pad_x = max(1, int(5 * safe_scale))
+    grid_pad_y = max(1, int(2 * safe_scale))
+
+    for index, character_name in enumerate(safe_character_names):
+      character_tile = self.gauntlet_played_tiles.get(character_name)
+
+      if character_tile is None:
+        continue
+
+      visual_column = index // max_rows_per_column
+      visual_row = index % max_rows_per_column
+
+      character_tile.grid(
+        row=visual_row,
+        column=visual_column,
+        padx=grid_pad_x,
+        pady=grid_pad_y,
+        sticky="n"
+      )
+
+    if update_width:
+      self.update_safe_character_sidebar_width(safe_character_names)
+
+  def clear_gauntlet_played_tiles(self):
+    if not hasattr(self, "gauntlet_played_tiles"):
+      return
+
+    self.cancel_gauntlet_played_refresh()
+
+    for character_tile in list(self.gauntlet_played_tiles.values()):
+      try:
+        character_tile.destroy()
+      except tk.TclError:
+        pass
+
+    self.gauntlet_played_tiles = {}
+    self.gauntlet_played_current_names = []
+    self.gauntlet_played_icon_images = []
+
+  def rebuild_gauntlet_played_tiles_for_resize(self):
+    if not self.gauntlet_enabled.get():
+      return
+
+    self.update_gauntlet_played_display(force=True)
+
+  def get_gauntlet_played_signature(self, role=None):
+    if role is None:
+      role = self.current_role
+
+    display_rows = self.history_store.get_gauntlet_display_rows(role)
+    safe_character_names = [
+      character_name
+      for display_row in display_rows
+      for character_name in display_row
+    ]
+
+    return (
+      role,
+      tuple(safe_character_names)
+    )
+
+  def update_gauntlet_played_display(self, force=False):
     if not hasattr(self, "gauntlet_played_frame"):
       return
 
     if not self.gauntlet_enabled.get():
+      self.cancel_gauntlet_played_refresh()
+      self.clear_gauntlet_played_tiles()
       self.gauntlet_played_frame.pack_forget()
+      self.gauntlet_played_last_signature = None
+      self.update_gauntlet_sidebar_visibility()
       return
 
     role = self.current_role
@@ -2152,68 +2669,83 @@ class BuildSlotMachineApp:
       for character_name in display_row
     ]
 
-    self.gauntlet_played_title_label.config(text=f"{role}s Played So Far")
+    current_signature = (role, tuple(safe_character_names))
 
-    for child in self.gauntlet_played_icon_frame.winfo_children():
-      child.destroy()
+    if not force and current_signature == self.gauntlet_played_last_signature:
+      self.update_safe_character_sidebar_width(safe_character_names)
+      return
 
-    self.gauntlet_played_icon_images = []
+    self.gauntlet_played_last_signature = current_signature
+    self.cancel_gauntlet_played_refresh()
+    self.clear_gauntlet_played_tiles()
 
-    if not safe_character_names:
-      empty_label = tk.Label(
-        self.gauntlet_played_icon_frame,
-        text=f"No {role.lower()}s played yet",
-        font=("Arial", self.scaled_font(10, 8)),
-        bg=BG_COLOR,
-        fg="white"
+    self.gauntlet_played_current_names = list(safe_character_names)
+    self.update_safe_character_sidebar_width(safe_character_names)
+    sidebar_width = self.get_safe_character_sidebar_width(safe_character_names)
+
+    self.gauntlet_played_title_label.config(
+      text="Safe Characters",
+      font=("Arial", self.sidebar_scaled(10, 8, 13), "bold"),
+      wraplength=max(
+        100,
+        sidebar_width - self.sidebar_scaled(24, 14, 40)
       )
-      empty_label.pack(padx=10, pady=20)
-    else:
-      visual_row = 0
-
-      for display_row in display_rows:
-        for column, character_name in enumerate(display_row[:self.gauntlet_played_max_columns]):
-          tile_width = self.scaled(76, 50)
-          tile_height = self.scaled(80, 56)
-          character_tile = tk.Frame(self.gauntlet_played_icon_frame, bg=BG_COLOR, width=tile_width, height=tile_height)
-          character_tile.grid(row=visual_row, column=column, padx=max(1, self.scaled(3, 1)), pady=max(1, self.scaled(2, 1)), sticky="n")
-          character_tile.grid_propagate(False)
-
-          portrait_label = tk.Label(character_tile, bg=BG_COLOR)
-          portrait_label.pack(pady=(0, 2))
-
-          portrait_path = self.character_portrait_files.get(character_name)
-
-          if portrait_path is not None and os.path.exists(portrait_path):
-            image = Image.open(portrait_path).resize((self.gauntlet_portrait_size, self.gauntlet_portrait_size))
-            portrait_image = ImageTk.PhotoImage(image)
-            self.gauntlet_played_icon_images.append(portrait_image)
-            portrait_label.config(image=portrait_image, text="")
-            portrait_label.image = portrait_image
-          else:
-            portrait_label.config(
-              text="No\nPortrait",
-              font=("Arial", self.scaled_font(8, 6), "bold"),
-              width=max(6, self.scaled(8, 6)),
-              height=max(3, self.scaled(4, 3)),
-              fg="white",
-              bg=SLOT_BG_COLOR
-            )
-
-          tk.Label(
-            character_tile,
-            text=character_name,
-            font=("Arial", self.scaled_font(7, 6)),
-            wraplength=self.scaled(72, 46),
-            justify="center",
-            bg=BG_COLOR,
-            fg="white"
-          ).pack()
-
-        visual_row += 1
+    )
 
     if not self.gauntlet_played_frame.winfo_ismapped():
-      self.gauntlet_played_frame.pack(pady=1)
+      self.gauntlet_played_frame.pack(fill="both", expand=True)
+
+    if not safe_character_names:
+      empty_text = f"No {role.lower()}s played yet"
+      empty_label = tk.Label(
+        self.gauntlet_played_icon_frame,
+        text=empty_text,
+        font=("Arial", self.sidebar_scaled(7, 6, 10)),
+        bg=BG_COLOR,
+        fg="white",
+        wraplength=max(
+          80,
+          sidebar_width - self.sidebar_scaled(24, 14, 40)
+        ),
+        justify="center"
+      )
+      self.gauntlet_played_tiles["__empty__"] = empty_label
+      empty_label.grid(row=0, column=0, padx=10, pady=20)
+      return
+
+    self.gauntlet_played_build_names = list(safe_character_names)
+    self.gauntlet_played_build_index = 0
+    self.build_gauntlet_played_tiles_chunk()
+
+  def build_gauntlet_played_tiles_chunk(self):
+    names = self.gauntlet_played_build_names
+
+    if self.gauntlet_played_build_index == 0:
+      self.update_safe_character_sidebar_width(names)
+
+    start_index = self.gauntlet_played_build_index
+    end_index = min(
+      len(names),
+      start_index + self.gauntlet_played_tiles_per_frame
+    )
+
+    for index in range(start_index, end_index):
+      character_name = names[index]
+      self.gauntlet_played_tiles[character_name] = self.create_gauntlet_played_tile(character_name)
+
+    self.gauntlet_played_build_index = end_index
+    self.reposition_gauntlet_played_tiles(names[:end_index], update_width=False)
+
+    if end_index < len(names):
+      self.gauntlet_played_refresh_job = self.root.after(
+        1,
+        self.build_gauntlet_played_tiles_chunk
+      )
+      return
+
+    self.gauntlet_played_refresh_job = None
+    self.reposition_gauntlet_played_tiles(names, update_width=True)
+    self.update_safe_character_sidebar_width(names)
 
   def apply_gauntlet_pending_button_locks(self):
     if not hasattr(self, "randomize_button"):
@@ -2231,6 +2763,418 @@ class BuildSlotMachineApp:
     if role == "Killer" and hasattr(self, "load_killer_build_button"):
       self.load_killer_build_button.config(state=button_state)
 
+  def build_trophy_case_sidebar(self):
+    self.trophy_sidebar_frame = tk.Frame(
+      self.root,
+      bg=BG_COLOR,
+      width=160,
+      height=600,
+      relief="flat",
+      borderwidth=0,
+      highlightthickness=0
+    )
+    self.trophy_sidebar_frame.place_forget()
+    self.trophy_sidebar_frame.pack_propagate(False)
+
+    self.trophy_sidebar_title = tk.Label(
+      self.trophy_sidebar_frame,
+      text="Trophy Case",
+      font=("Arial", 16, "bold"),
+      bg=BG_COLOR,
+      fg="white"
+    )
+    self.trophy_sidebar_title.pack(pady=(8, 4))
+
+    self.trophy_sidebar_role_label = tk.Label(
+      self.trophy_sidebar_frame,
+      text="",
+      font=("Arial", 11, "bold"),
+      bg=BG_COLOR,
+      fg="white"
+    )
+    self.trophy_sidebar_role_label.pack(pady=(0, 8))
+
+    self.trophy_sidebar_canvas = tk.Canvas(
+      self.trophy_sidebar_frame,
+      bg=BG_COLOR,
+      highlightthickness=0,
+      borderwidth=0,
+      relief="flat"
+    )
+    self.trophy_sidebar_scrollbar = tk.Scrollbar(
+      self.trophy_sidebar_frame,
+      orient="vertical",
+      command=self.trophy_sidebar_canvas.yview
+    )
+    self.trophy_sidebar_inner_frame = tk.Frame(
+      self.trophy_sidebar_canvas,
+      bg=BG_COLOR
+    )
+
+    self.trophy_sidebar_inner_frame.bind(
+      "<Configure>",
+      lambda event: self.trophy_sidebar_canvas.configure(
+        scrollregion=self.trophy_sidebar_canvas.bbox("all")
+      )
+    )
+
+    self.trophy_sidebar_canvas.create_window(
+      (0, 0),
+      window=self.trophy_sidebar_inner_frame,
+      anchor="nw"
+    )
+    self.trophy_sidebar_canvas.configure(
+      yscrollcommand=self.trophy_sidebar_scrollbar.set
+    )
+
+    self.trophy_sidebar_canvas.pack(side="left", fill="both", expand=True, padx=(6, 0), pady=(0, 6))
+    self.trophy_sidebar_scrollbar.pack(side="right", fill="y", pady=(0, 6))
+
+    self.update_trophy_case_sidebar()
+
+  def update_gauntlet_sidebar_visibility(self):
+    if not hasattr(self, "gauntlet_sidebar_frame"):
+      return
+
+    if self.gauntlet_enabled.get():
+      role = self.current_role
+      display_rows = self.history_store.get_gauntlet_display_rows(role)
+      safe_character_names = [
+        character_name
+        for display_row in display_rows
+        for character_name in display_row
+      ]
+
+      self.gauntlet_played_current_names = list(safe_character_names)
+      sidebar_width = self.get_safe_character_sidebar_width(safe_character_names)
+      gauntlet_sidebar_height = max(
+        self.sidebar_scaled(520, 420, 900),
+        int(self.root.winfo_height() * 0.82)
+      )
+
+      if self.gauntlet_sidebar_frame.winfo_ismapped():
+        self.gauntlet_sidebar_frame.place_configure(
+          x=6,
+          y=6,
+          width=sidebar_width,
+          height=gauntlet_sidebar_height
+        )
+      else:
+        self.gauntlet_sidebar_frame.place(
+          x=6,
+          y=6,
+          anchor="nw",
+          width=sidebar_width,
+          height=gauntlet_sidebar_height
+        )
+
+      self.update_safe_character_sidebar_width(safe_character_names)
+      self.gauntlet_sidebar_frame.lift()
+    else:
+      self.gauntlet_sidebar_frame.config(width=0)
+      self.gauntlet_sidebar_frame.place_forget()
+
+  def update_trophy_sidebar_visibility(self):
+    if not hasattr(self, "trophy_sidebar_frame"):
+      return
+
+    if self.gauntlet_enabled.get():
+      sidebar_height = max(
+        self.sidebar_scaled(620, 500, 1050),
+        int(self.root.winfo_height() * 0.78)
+      )
+      self.trophy_sidebar_frame.place(
+        relx=1.0,
+        x=-24,
+        y=8,
+        anchor="ne",
+        width=self.sidebar_scaled(240, 180, 345),
+        height=sidebar_height
+      )
+      self.trophy_sidebar_frame.lift()
+    else:
+      self.trophy_sidebar_frame.place_forget()
+
+  def get_place_label(self, place_number):
+    if place_number == 1:
+      return "1st Place"
+
+    if place_number == 2:
+      return "2nd Place"
+
+    if place_number == 3:
+      return "3rd Place"
+
+    return f"{place_number}th Place"
+
+  def show_trophy_tooltip(self, event, trophy, place_number):
+    self.hide_trophy_tooltip()
+
+    tooltip = tk.Toplevel(self.root)
+    tooltip.wm_overrideredirect(True)
+    tooltip.config(bg="#111111", padx=8, pady=6)
+
+    place_label = self.get_place_label(place_number)
+    stats_text = (
+      f"{place_label}\n"
+      f"Characters Played: {trophy['total_characters_played']}\n"
+      f"Max Streak: {trophy['max_streak']}\n"
+      f"Final Streak: {trophy['final_streak']}\n"
+      f"Fails: {trophy['failure_count']}\n"
+      f"Completed: {trophy['timestamp']}"
+    )
+
+    tk.Label(
+      tooltip,
+      text=stats_text,
+      font=("Arial", self.sidebar_scaled(10, 7, 14), "bold"),
+      bg="#111111",
+      fg="white",
+      justify="left"
+    ).pack()
+
+    tooltip.update_idletasks()
+
+    root_x = self.root.winfo_rootx()
+    root_y = self.root.winfo_rooty()
+    root_width = self.root.winfo_width()
+    root_height = self.root.winfo_height()
+
+    tooltip_width = tooltip.winfo_reqwidth()
+    tooltip_height = tooltip.winfo_reqheight()
+
+    desired_x = event.x_root + 16
+    desired_y = event.y_root + 12
+
+    min_x = root_x + 8
+    min_y = root_y + 8
+    max_x = root_x + root_width - tooltip_width - 8
+    max_y = root_y + root_height - tooltip_height - 8
+
+    if max_x < min_x:
+      max_x = min_x
+
+    if max_y < min_y:
+      max_y = min_y
+
+    clamped_x = min(max(desired_x, min_x), max_x)
+    clamped_y = min(max(desired_y, min_y), max_y)
+
+    tooltip.geometry(f"+{clamped_x}+{clamped_y}")
+
+    self.trophy_tooltip_window = tooltip
+
+  def hide_trophy_tooltip(self, event=None):
+    if self.trophy_tooltip_window is None:
+      return
+
+    try:
+      self.trophy_tooltip_window.destroy()
+    except tk.TclError:
+      pass
+
+    self.trophy_tooltip_window = None
+
+  def get_trophy_icon(self, file_name, size=92):
+    cache_key = f"{file_name}:{size}"
+
+    if cache_key in self.trophy_images:
+      return self.trophy_images[cache_key]
+
+    file_path = file_name
+
+    if not os.path.isabs(file_path):
+      file_path = os.path.join(app_folder(), file_path)
+
+    if not os.path.exists(file_path):
+      print(f"Trophy icon not found: {file_path}")
+      return None
+
+    try:
+      image = Image.open(file_path).convert("RGBA").resize((size, size))
+      trophy_image = ImageTk.PhotoImage(image)
+      self.trophy_images[cache_key] = trophy_image
+      return trophy_image
+    except Exception as error:
+      print(f"Could not load trophy icon: {file_path}")
+      print(error)
+      return None
+
+  def update_trophy_case_sidebar(self):
+    if not hasattr(self, "trophy_sidebar_inner_frame"):
+      return
+
+    if not self.gauntlet_enabled.get():
+      self.update_trophy_sidebar_visibility()
+      return
+
+    self.update_trophy_sidebar_visibility()
+
+    role = self.current_role
+    trophies = self.history_store.get_gauntlet_trophies(role)
+
+    self.trophy_sidebar_role_label.config(text=f"{role} Rankings")
+
+    for child in self.trophy_sidebar_inner_frame.winfo_children():
+      child.destroy()
+
+    if not trophies:
+      tk.Label(
+        self.trophy_sidebar_inner_frame,
+        text=f"No completed {role.lower()} gauntlets yet.",
+        font=("Arial", self.sidebar_scaled(10, 7, 14), "bold"),
+        bg=BG_COLOR,
+        fg="white",
+        wraplength=self.sidebar_scaled(180, 130, 300),
+        justify="center"
+      ).pack(pady=self.sidebar_scaled(20, 12, 34))
+      return
+
+    trophy_icon_files = {
+      1: os.path.join("dependencies", "gold_trophy.png"),
+      2: os.path.join("dependencies", "silver_trophy.png"),
+      3: os.path.join("dependencies", "bronze_trophy.png")
+    }
+
+    trophy_sidebar_width = max(
+      self.sidebar_scaled(240, 180, 345),
+      self.trophy_sidebar_frame.winfo_width()
+    )
+
+    for index, trophy in enumerate(trophies, start=1):
+      card_width = max(
+        self.sidebar_scaled(175, 140, 320),
+        trophy_sidebar_width - self.sidebar_scaled(18, 10, 30)
+      )
+      card_height = self.sidebar_scaled(200, 150, 285)
+
+      if index > 3:
+        card_height = self.sidebar_scaled(150, 115, 220)
+
+      trophy_icon_size = self.sidebar_scaled(88, 62, 130)
+      place_font_size = self.sidebar_scaled(14, 10, 20)
+      stat_font_size = self.sidebar_scaled(11, 8, 16)
+
+      row_frame = tk.Frame(
+        self.trophy_sidebar_inner_frame,
+        bg=BG_COLOR,
+        width=card_width,
+        height=card_height,
+        relief="flat",
+        borderwidth=0,
+        highlightthickness=0
+      )
+      row_frame.pack(
+        padx=self.sidebar_scaled(6, 3, 10),
+        pady=self.sidebar_scaled(8, 4, 12)
+      )
+      row_frame.pack_propagate(False)
+
+      hover_widgets = [row_frame]
+
+      if index in trophy_icon_files:
+        trophy_image = self.get_trophy_icon(
+          trophy_icon_files[index],
+          size=trophy_icon_size
+        )
+
+        if trophy_image is not None:
+          trophy_icon_label = tk.Label(
+            row_frame,
+            image=trophy_image,
+            bg=BG_COLOR
+          )
+          trophy_icon_label.image = trophy_image
+          trophy_icon_label.pack(
+            pady=(self.sidebar_scaled(6, 3, 10), self.sidebar_scaled(2, 1, 4))
+          )
+          hover_widgets.append(trophy_icon_label)
+        else:
+          trophy_icon_label = tk.Label(
+            row_frame,
+            text=f"#{index}",
+            font=("Arial", self.sidebar_scaled(22, 14, 32), "bold"),
+            bg=BG_COLOR,
+            fg="white"
+          )
+          trophy_icon_label.pack(
+            pady=(self.sidebar_scaled(8, 4, 12), self.sidebar_scaled(2, 1, 4))
+          )
+          hover_widgets.append(trophy_icon_label)
+
+        stat_label = tk.Label(
+          row_frame,
+          text=f"{self.get_place_label(index)}\nPlayed: {trophy['total_characters_played']}",
+          font=("Arial", stat_font_size, "bold"),
+          bg=BG_COLOR,
+          fg="white",
+          justify="center"
+        )
+        stat_label.pack(
+          pady=(self.sidebar_scaled(2, 1, 4), self.sidebar_scaled(6, 3, 10))
+        )
+        hover_widgets.append(stat_label)
+      else:
+        place_label_widget = tk.Label(
+          row_frame,
+          text=self.get_place_label(index),
+          font=("Arial", place_font_size, "bold"),
+          bg=BG_COLOR,
+          fg="white"
+        )
+        place_label_widget.pack(
+          pady=(self.sidebar_scaled(8, 4, 12), self.sidebar_scaled(2, 1, 4))
+        )
+
+        stat_label = tk.Label(
+          row_frame,
+          text=(
+            f"Played: {trophy['total_characters_played']}\n"
+            f"Max: {trophy['max_streak']}\n"
+            f"Fails: {trophy['failure_count']}"
+          ),
+          font=("Arial", stat_font_size),
+          bg=BG_COLOR,
+          fg="white",
+          justify="center"
+        )
+        stat_label.pack(
+          pady=(self.sidebar_scaled(2, 1, 4), self.sidebar_scaled(6, 3, 10))
+        )
+        hover_widgets.extend([place_label_widget, stat_label])
+
+      for widget in hover_widgets:
+        widget.bind(
+          "<Enter>",
+          lambda event, saved_trophy=trophy, saved_index=index: self.show_trophy_tooltip(
+            event,
+            saved_trophy,
+            saved_index
+          )
+        )
+        widget.bind("<Leave>", self.hide_trophy_tooltip)
+
+  def complete_gauntlet_and_save_trophy(self, role):
+    trophy_data = {
+      "role": role,
+      "max_streak": self.gauntlet_stats[role]["max_streak"],
+      "failure_count": self.gauntlet_stats[role]["failure_count"],
+      "total_characters_played": self.gauntlet_stats[role]["total_characters_played"],
+      "final_streak": self.gauntlet_stats[role]["current_streak"]
+    }
+
+    self.history_store.record_gauntlet_trophy(role, trophy_data)
+    self.history_store.clear_gauntlet(role)
+
+    self.gauntlet_stats[role] = {
+      "current_streak": 0,
+      "max_streak": 0,
+      "failure_count": 0,
+      "total_characters_played": 0
+    }
+    self.history_store.save_gauntlet_stats(role, self.gauntlet_stats[role])
+    self.gauntlet_result_pending[role] = False
+
   def update_saved_build_button_visibility(self):
     if not hasattr(self, "load_survivor_build_button") or not hasattr(self, "load_killer_build_button"):
       return
@@ -2247,10 +3191,25 @@ class BuildSlotMachineApp:
 
     self.apply_gauntlet_pending_button_locks()
 
+  def reload_gauntlet_stats(self, role=None):
+    if role is None:
+      role = self.current_role
+
+    self.gauntlet_stats[role] = self.history_store.load_gauntlet_stats(role)
+
+    if hasattr(self, "gauntlet_streak_label"):
+      self.update_gauntlet_streak_label()
+
   def update_gauntlet_controls(self):
     if not hasattr(self, "gauntlet_result_frame"):
       return
 
+    if self.gauntlet_enabled.get():
+      self.reload_gauntlet_stats(self.current_role)
+
+    self.update_gauntlet_sidebar_visibility()
+    self.update_trophy_sidebar_visibility()
+    self.update_trophy_case_sidebar()
     self.update_gauntlet_streak_label()
     self.update_gauntlet_played_display()
 
@@ -2302,12 +3261,19 @@ class BuildSlotMachineApp:
       return
 
     self.history_store.clear_gauntlet(role)
-    self.gauntlet_stats[role]["current_streak"] = 0
-    self.gauntlet_stats[role]["max_streak"] = 0
-    self.gauntlet_stats[role]["failure_count"] = 0
+    self.gauntlet_played_last_signature = None
+    self.gauntlet_stats[role] = {
+      "current_streak": 0,
+      "max_streak": 0,
+      "failure_count": 0,
+      "total_characters_played": 0
+    }
+    self.history_store.save_gauntlet_stats(role, self.gauntlet_stats[role])
     self.gauntlet_result_pending[role] = False
     self.result_label.config(text=f"{role} gauntlet progress cleared.")
+    self.update_gauntlet_played_display(force=True)
     self.update_gauntlet_controls()
+    self.update_trophy_case_sidebar()
 
   def record_gauntlet_success(self):
     role = self.current_role
@@ -2322,12 +3288,23 @@ class BuildSlotMachineApp:
     total_characters = len(self.killer_characters if role == "Killer" else self.survivor_characters)
 
     self.gauntlet_stats[role]["current_streak"] += 1
+    self.gauntlet_stats[role]["total_characters_played"] += 1
 
     if self.gauntlet_stats[role]["current_streak"] > self.gauntlet_stats[role]["max_streak"]:
       self.gauntlet_stats[role]["max_streak"] = self.gauntlet_stats[role]["current_streak"]
-    
+
+    self.history_store.save_gauntlet_stats(role, self.gauntlet_stats[role])
+
     if safe_count >= total_characters and total_characters > 0:
-      self.result_label.config(text=f"{role} gauntlet complete! Every {role.lower()} is safe!")
+      completed_stats = dict(self.gauntlet_stats[role])
+      self.complete_gauntlet_and_save_trophy(role)
+      self.update_trophy_case_sidebar()
+      self.result_label.config(
+        text=(
+          f"{role} gauntlet complete! "
+          f"Trophy saved with {completed_stats['total_characters_played']} total characters played."
+        )
+      )
       self.show_gauntlet_complete_fireworks(role)
     else:
       self.result_label.config(text=f"{character_name} marked safe for {role}. Safe count: {safe_count}.")
@@ -2335,6 +3312,7 @@ class BuildSlotMachineApp:
     self.gauntlet_success_button.config(state="disabled")
     self.gauntlet_failure_button.config(state="disabled")
     self.gauntlet_result_pending[role] = False
+    self.update_gauntlet_played_display(force=True)
     self.update_gauntlet_controls()
 
   def record_gauntlet_failure(self):
@@ -2345,7 +3323,7 @@ class BuildSlotMachineApp:
       return
 
     character_name = last_roll["character"]["name"]
-    result = "0-3K" if role == "Killer" else "Death"
+    result = "0-3K" if role == "Killer" else "Died"
     checkpoint_count = self.history_store.get_gauntlet_state(role)["checkpoint_count"]
 
     messagebox.showwarning(
@@ -2353,12 +3331,16 @@ class BuildSlotMachineApp:
       f"{result} recorded for {character_name}. Your {role} gauntlet save will be reset to the most recent checkpoint: {checkpoint_count} safe characters."
     )
 
+    self.gauntlet_stats[role]["total_characters_played"] += 1
     self.gauntlet_stats[role]["failure_count"] += 1
     self.gauntlet_stats[role]["current_streak"] = 0
-    
+    self.history_store.save_gauntlet_stats(role, self.gauntlet_stats[role])
+
     reset_count = self.history_store.record_gauntlet_failure_reset(role, character_name, result)
+    self.clear_gauntlet_played_tiles()
     self.result_label.config(text=f"{role} gauntlet reset to checkpoint: {reset_count} safe characters.")
     self.gauntlet_success_button.config(state="disabled")
     self.gauntlet_failure_button.config(state="disabled")
     self.gauntlet_result_pending[role] = False
+    self.update_gauntlet_played_display(force=True)
     self.update_gauntlet_controls()

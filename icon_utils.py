@@ -3,6 +3,7 @@ import re
 
 from config import (
   CHARACTER_PORTRAIT_EXACT_FILES,
+  OFFERING_EXACT_ICON_FILES,
   SOURCE_ADDON_ICON_FOLDER,
   SOURCE_CHARACTER_PORTRAIT_FOLDER,
   SOURCE_ICON_FOLDER,
@@ -185,11 +186,22 @@ def build_offering_option_icon_files():
     for normalized_name in get_icon_search_keys(clean_unlockable_file_name(file_path)):
       normalized_icon_files[normalized_name] = file_path
 
+  exact_icon_files = {
+    icon_name: os.path.join(SOURCE_OFFERING_ICON_FOLDER, relative_path)
+    for icon_name, relative_path in OFFERING_EXACT_ICON_FILES.items()
+  }
+
   for offering_option in get_all_offering_options():
     icon_name = offering_option.get("icon_name")
     icon_key = offering_option.get("icon_key")
 
     if icon_name is None:
+      continue
+
+    exact_icon_path = exact_icon_files.get(icon_name)
+
+    if exact_icon_path is not None and os.path.exists(exact_icon_path):
+      matched_icons[icon_key] = exact_icon_path
       continue
 
     for search_key in get_icon_search_keys(icon_name):

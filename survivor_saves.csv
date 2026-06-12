@@ -1,0 +1,2 @@
+timestamp,event,role,character,result,safe_count,safe_characters,build_json,data_json
+2026-06-12T16:27:24,build,Survivor,Yoichi Asakawa,,0,[],"{""role"": ""Survivor"", ""character"": ""Yoichi Asakawa"", ""perks"": [""Alert"", ""We See You"", ""Blast Mine"", ""Reassurance""], ""item"": ""Cryptic Map"", ""addons"": [""Crimson Stamp"", ""Odd Stamp""], ""offering"": ""Bloodpoints""}",
