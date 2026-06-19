@@ -1,7 +1,7 @@
 # DBD Build Slot Machine
 
 ## Version Number
-- Version 1.1.0
+- Version 1.1.1
 
 ## File layout
 
