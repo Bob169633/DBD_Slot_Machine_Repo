@@ -3,6 +3,8 @@ import re
 
 from config import (
   CHARACTER_PORTRAIT_EXACT_FILES,
+  KILLER_ADDON_EXACT_ICON_FILES,
+  KILLER_POWER_EXACT_ICON_FILES,
   OFFERING_EXACT_ICON_FILES,
   SOURCE_ADDON_ICON_FOLDER,
   SOURCE_CHARACTER_PORTRAIT_FOLDER,
@@ -151,6 +153,13 @@ def build_unlockable_icon_files(unlockables, source_folder):
   icon_files = get_png_files_from_folder(source_folder)
   matched_icons = {}
   normalized_icon_files = {}
+  exact_icon_files = {}
+
+  if source_folder == SOURCE_ADDON_ICON_FOLDER:
+    exact_icon_files = {
+      normalize_text(icon_name): icon_path
+      for icon_name, icon_path in KILLER_ADDON_EXACT_ICON_FILES.items()
+    }
 
   for file_path in icon_files:
     for normalized_name in get_icon_search_keys(clean_unlockable_file_name(file_path)):
@@ -158,6 +167,12 @@ def build_unlockable_icon_files(unlockables, source_folder):
 
   for unlockable in unlockables:
     unlockable_name = unlockable["name"]
+    normalized_unlockable_name = normalize_text(unlockable_name)
+    exact_icon_path = exact_icon_files.get(normalized_unlockable_name)
+
+    if exact_icon_path is not None and os.path.exists(exact_icon_path):
+      matched_icons[unlockable_name] = exact_icon_path
+      continue
 
     for search_key in get_icon_search_keys(unlockable_name):
       if search_key in normalized_icon_files:
@@ -223,6 +238,11 @@ def build_killer_power_icon_files(killer_characters):
 
   for character in killer_characters:
     power_name = get_killer_power_name(character)
+    exact_icon_path = KILLER_POWER_EXACT_ICON_FILES.get(power_name)
+
+    if exact_icon_path is not None and os.path.exists(exact_icon_path):
+      power_icon_files[power_name] = exact_icon_path
+      continue
 
     for search_key in get_icon_search_keys(power_name):
       if search_key in normalized_icon_files:

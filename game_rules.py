@@ -4,7 +4,6 @@ from api_client import get_searchable_entry_text
 from killer_addon_map import get_manual_killer_addons
 from config import (
   KILLER_ADDON_EXACT_POWER_BY_ADDON,
-  KILLER_ADDON_OWNER_ALIASES,
   KILLER_ONLY_OFFERING_OPTION_NAMES,
   KILLER_POWER_BY_KILLER,
   OFFERING_ICON_NAME_BY_ROLE,
@@ -176,18 +175,12 @@ def get_killer_power_name(character):
 def get_killer_addon_terms(character):
   character_name = character.get("name", "")
   power_name = get_killer_power_name(character)
-  raw_text = get_searchable_entry_text(character.get("raw", {}))
-  search_text = normalize_icon_search_text(f"{character_name} {power_name} {raw_text}")
 
-  terms = [character_name, power_name]
-  normalized_character_name = normalize_icon_search_text(character_name)
-
-  if normalized_character_name in KILLER_ADDON_OWNER_ALIASES:
-    terms.extend(KILLER_ADDON_OWNER_ALIASES[normalized_character_name])
-
-  for alias_key, alias_terms in KILLER_ADDON_OWNER_ALIASES.items():
-    if alias_key in search_text:
-      terms.extend(alias_terms)
+  terms = [
+    character_name,
+    character_name.replace("The ", "", 1),
+    power_name
+  ]
 
   unique_terms = []
 

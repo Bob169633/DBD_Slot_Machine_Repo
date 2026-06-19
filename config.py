@@ -37,7 +37,11 @@ KILLER_ONLY_OFFERING_OPTION_NAMES = (
 )
 
 OFFERING_EXACT_ICON_FILES = {
-  "Ebony Memento Mori": "iconFavors_mementoMoriEbony.png"
+  "Ebony Memento Mori": r"C:\Program Files (x86)\Steam\steamapps\common\Dead by Daylight\DeadByDaylight\Content\UI\Icons\Favors\iconFavors_momentoMoriEbony.png"
+}
+
+KILLER_ADDON_EXACT_ICON_FILES = {
+  "Grandma's Heart": r"C:\Program Files (x86)\Steam\steamapps\common\Dead by Daylight\DeadByDaylight\Content\UI\Icons\ItemAddons\DLC3\iconAddon_granmasHeart.png",
 }
 
 OFFERING_ICON_NAME_BY_ROLE = {
@@ -133,7 +137,8 @@ KILLER_POWER_BY_KILLER = {
   "The Houndmaster": "Scent of Blood",
   "The Ghoul": "Kagune Leap",
   "The Krasue": "Unbodied Flesh",
-  "The Animatronic": "Fazbear's Fright"
+  "The Animatronic": "Fazbear's Fright",
+  "The Slasher": "Omnipresent Evil",
 }
 
 KILLER_POWER_EXACT_ICON_FILES = {
@@ -150,6 +155,7 @@ KILLER_POWER_EXACT_ICON_FILES = {
   "Blood Bond": r"C:\Program Files (x86)\Steam\steamapps\common\Dead by Daylight\DeadByDaylight\Content\UI\Icons\Powers\Aurora\iconPowers_bloodBond_01.png",
   "UVX": r"C:\Program Files (x86)\Steam\steamapps\common\Dead by Daylight\DeadByDaylight\Content\UI\Icons\Powers\Applepie\iconPowers_CreateHallucination_K35.png",
   "Hidden Pursuit": r"C:\Program Files (x86)\Steam\steamapps\common\Dead by Daylight\DeadByDaylight\Content\UI\Icons\Powers\Wormhole\iconPowers_hiddenPursuit_active.png",
+  "Omnipresent Evil": r"C:\Program Files (x86)\Steam\steamapps\common\Dead by Daylight\DeadByDaylight\Content\UI\Icons\Powers\Sushi\T_UI_iconPowers_DramaticEntrance.png",
 }
 KILLER_POWER_RANDOM_ICON_ALIASES = {
   "Guardia Compagnia": [

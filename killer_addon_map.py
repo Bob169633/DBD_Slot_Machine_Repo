@@ -36,7 +36,7 @@ KILLER_ADDON_NAMES = {
     "jewelry", "blonde hair", "boyfriend's memo", "memorial flower", "tacky earrings",
   ],
   "Hag": [
-    "mint rag", "waterlogged shoe", "disfigured ear", "granma's heart", "rusty shackles",
+    "mint rag", "waterlogged shoe", "disfigured ear", "grandma's heart", "rusty shackles",
     "scarred hand", "bloodied mud", "cracked turtle egg", "dried cicada", "swamp orchid necklet",
     "willow wreath", "bloodied water", "cypress necklet", "dragonfly wings", "half eggshell",
     "pussy willow catkins", "bog water", "dead fly mud", "powdered eggshell", "rope necklet",
@@ -271,58 +271,21 @@ KILLER_ADDON_NAMES = {
     "gutted supercom", "shattered wrist rocket", "smashed cassette deck", "bead maze",
     "mid-century radio", "orderly ID", "stained glass mural",
   ],
-}
-
-KILLER_ADDON_ALIASES = {
-  "Trapper": ["Trapper", "The Trapper"],
-  "Wraith": ["Wraith", "The Wraith"],
-  "Hillbilly": ["Hillbilly", "The Hillbilly"],
-  "Nurse": ["Nurse", "The Nurse"],
-  "Shape": ["Shape", "The Shape", "Michael Myers"],
-  "Hag": ["Hag", "The Hag"],
-  "Doctor": ["Doctor", "The Doctor"],
-  "Cannibal": ["Cannibal", "The Cannibal", "Leatherface", "Bubba Sawyer"],
-  "Huntress": ["Huntress", "The Huntress"],
-  "Nightmare": ["Nightmare", "The Nightmare", "Freddy", "Freddy Krueger"],
-  "Pig": ["Pig", "The Pig", "Amanda Young"],
-  "Clown": ["Clown", "The Clown"],
-  "Spirit": ["Spirit", "The Spirit"],
-  "Legion": ["Legion", "The Legion"],
-  "Plague": ["Plague", "The Plague"],
-  "Ghost Face": ["Ghost Face", "The Ghost Face", "Ghostface", "The Ghostface"],
-  "Demogorgon": ["Demogorgon", "The Demogorgon"],
-  "Oni": ["Oni", "The Oni"],
-  "Deathslinger": ["Deathslinger", "The Deathslinger"],
-  "Executioner": ["Executioner", "The Executioner", "Pyramid Head"],
-  "Blight": ["Blight", "The Blight"],
-  "Twins": ["Twins", "The Twins", "Charlotte", "Victor", "Charlotte & Victor"],
-  "Trickster": ["Trickster", "The Trickster", "Ji-Woon", "Ji-Woon Hak"],
-  "Nemesis": ["Nemesis", "The Nemesis", "Nemesis T-Type"],
-  "Cenobite": ["Cenobite", "The Cenobite", "Pinhead", "Elliot Spencer"],
-  "Artist": ["Artist", "The Artist", "Carmina Mora"],
-  "Onryō": ["Onryō", "The Onryō", "Onryo", "The Onryo", "Sadako", "Sadako Yamamura"],
-  "Dredge": ["Dredge", "The Dredge"],
-  "Mastermind": ["Mastermind", "The Mastermind", "Albert Wesker", "Wesker"],
-  "Knight": ["Knight", "The Knight"],
-  "Skull Merchant": ["Skull Merchant", "The Skull Merchant"],
-  "Singularity": ["Singularity", "The Singularity", "HUX", "The HUX"],
-  "Xenomorph": ["Xenomorph", "The Xenomorph", "Alien", "The Alien"],
-  "Good Guy": ["Good Guy", "The Good Guy", "Chucky", "Charles Lee Ray"],
-  "Unknown": ["Unknown", "The Unknown"],
-  "Lich": ["Lich", "The Lich", "Vecna"],
-  "Dark Lord": ["Dark Lord", "The Dark Lord", "Dracula", "Count Dracula"],
-  "Houndmaster": ["Houndmaster", "The Houndmaster"],
-  "Ghoul": ["Ghoul", "The Ghoul", "Kaneki", "Ken Kaneki"],
-  "Animatronic": ["Animatronic", "The Animatronic", "Springtrap", "Freddy Fazbear"],
-  "Krasue": ["Krasue", "The Krasue"],
-  "First": ["First", "The First"],
+  "Slasher": [
+    "dirty money", "iridescent boat motor", "bloody magazine", "burnt fuse", "deputy's badge",
+    "missing corkscrew", "eye goop", "imprinted aluminum", "mirror shards", "sauna rock", "two nails",
+    "bloody smile", "coroner's coffee", "party noisemaker", "sleeping bag", "toxic waste",
+    "bent wheel", "garden claw", "knitting needle", "orderly's shoe",
+  ],
 }
 
 KILLER_KEY_BY_ALIAS = {}
-for killer_name, aliases in KILLER_ADDON_ALIASES.items():
-  KILLER_KEY_BY_ALIAS[normalize_icon_search_text(killer_name)] = killer_name
-  for alias in aliases:
-    KILLER_KEY_BY_ALIAS[normalize_icon_search_text(alias)] = killer_name
+for killer_name in KILLER_ADDON_NAMES:
+  normalized_killer_name = normalize_icon_search_text(killer_name)
+  KILLER_KEY_BY_ALIAS[normalized_killer_name] = killer_name
+
+  the_killer_name = f"The {killer_name}"
+  KILLER_KEY_BY_ALIAS[normalize_icon_search_text(the_killer_name)] = killer_name
 
 NORMALIZED_ADDON_NAMES_BY_KILLER = {
   killer_name: {normalize_icon_search_text(addon_name) for addon_name in addon_names}
