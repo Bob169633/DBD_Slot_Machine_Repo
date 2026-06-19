@@ -33,6 +33,3 @@
 1. Click the green button, download zip
 2. Extract files (I recommend a folder on your desktop)
 3. See my local_python repository for detailed instructions on creating the executable (https://github.com/Bob169633/portable_python)
-
-## Note
-This also searches for local Python installs
