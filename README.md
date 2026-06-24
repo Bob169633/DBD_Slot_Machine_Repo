@@ -1,12 +1,13 @@
 # DBD Build Slot Machine
 
 ## Version Number
-- Version 1.1.1
+- Version 1.2.0
 
 ## File layout
 
 - `spinthewheel.py` - wrapper/entry point. Loads API data and starts the GUI.
 - `app.py` - Tkinter GUI and build randomization display logic.
+- `adept_rules.py` - character perk mapping
 - `config.py` - paths, URLs, colors, mappings, blocked add-ons, and DBD constants.
 - `api_client.py` - all API requests and API parsing helpers.
 - `filters.py` - survivor item and add-on filtering.
@@ -27,6 +28,7 @@
 - Slot icon borders flash gold and white when final build is selected
 - Character enabling (toggle owned characters)
 - Trophy Case to display best gauntlet runs
+- Adept and Adept Hardmode challenges added
 
 ## Building `spinthewheel.exe`
 

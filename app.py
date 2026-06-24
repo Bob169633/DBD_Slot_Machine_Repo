@@ -8,6 +8,12 @@ from tkinter import messagebox
 
 from PIL import Image, ImageTk
 
+from adept_rules import (
+  choose_adept_loadout_source_character,
+  get_adept_perk_names,
+  initialize_adept_perk_dictionaries
+)
+
 from config import (
   BG_COLOR,
   KILLER_POWER_EXACT_ICON_FILES,
@@ -74,6 +80,10 @@ class BuildSlotMachineApp:
     self.survivor_items = survivor_items
     self.survivor_addons = survivor_addons
     self.killer_addons = killer_addons
+    initialize_adept_perk_dictionaries(
+      self.survivor_characters,
+      self.killer_characters
+    )
 
     self.selected_role = tk.StringVar(value="Survivor")
     self.current_role = "Survivor"
@@ -103,6 +113,8 @@ class BuildSlotMachineApp:
       "Survivor": self.unlock_store.get_unlocked_character_names("Survivor", self.survivor_characters),
       "Killer": self.unlock_store.get_unlocked_character_names("Killer", self.killer_characters)
     }
+    self.survivor_characters = survivor_characters
+    self.killer_characters = killer_characters
     self.gauntlet_stats = {
       "Survivor": self.history_store.load_gauntlet_stats("Survivor"),
       "Killer": self.history_store.load_gauntlet_stats("Killer")
@@ -118,6 +130,8 @@ class BuildSlotMachineApp:
     self.include_offering = tk.BooleanVar(value=True)
     self.save_builds_to_csv = tk.BooleanVar(value=False)
     self.gauntlet_enabled = tk.BooleanVar(value=False)
+    self.adept_enabled = tk.BooleanVar(value=False)
+    self.adept_hardmode_enabled = tk.BooleanVar(value=False)
 
     self.debug_character_choice = tk.StringVar(value="Random")
     self.debug_item_choice = tk.StringVar(value="Random")
@@ -758,6 +772,7 @@ class BuildSlotMachineApp:
     for widget_name in (
       "include_character_checkbox", "include_item_checkbox", "include_offering_checkbox",
       "save_builds_checkbox", "gauntlet_checkbox",
+      "adept_checkbox", "adept_hardmode_checkbox",
       "debug_character_label", "debug_item_label", "debug_addon_1_label",
       "debug_addon_2_label", "debug_offering_label", "debug_gauntlet_spin_label"
     ):
@@ -918,6 +933,7 @@ class BuildSlotMachineApp:
 
     self.lever_label = tk.Label(self.root, text="Lever set to: Survivor", font=("Arial", 13, "bold"))
     self.lever_label.pack(pady=1)
+    
 
   def build_character_and_perk_slots(self):
     self.main_slot_frame = tk.Frame(self.root)
@@ -1070,15 +1086,36 @@ class BuildSlotMachineApp:
       font=("Arial", 12, "bold")
     )
     self.save_builds_checkbox.pack(side="left", padx=10)
-
+    
+    self.mode_control_frame = tk.Frame(self.root)
+    self.mode_control_frame.pack(pady=2)
+    
     self.gauntlet_checkbox = tk.Checkbutton(
-      self.extra_control_frame,
+      self.mode_control_frame,
       text="Gauntlet",
       variable=self.gauntlet_enabled,
       font=("Arial", 12, "bold"),
       command=self.update_gauntlet_controls
     )
     self.gauntlet_checkbox.pack(side="left", padx=10)
+    
+    self.adept_checkbox = tk.Checkbutton(
+      self.mode_control_frame,
+      text="Adept",
+      variable=self.adept_enabled,
+      command=self.on_adept_mode_changed,
+      font=("Arial", 10, "bold")
+    )
+    self.adept_checkbox.pack(side="left", padx=10)
+
+    self.adept_hardmode_checkbox = tk.Checkbutton(
+      self.mode_control_frame,
+      text="Adept Hardmode",
+      variable=self.adept_hardmode_enabled,
+      command=self.on_adept_hardmode_mode_changed,
+      font=("Arial", 10, "bold")
+    )
+    self.adept_hardmode_checkbox.pack(side="left", padx=10)
 
 
   def build_debug_controls(self):
@@ -1343,6 +1380,33 @@ class BuildSlotMachineApp:
         selected_addons.append(addon)
 
     return selected_addons
+  
+  def on_adept_mode_changed(self):
+    if self.adept_enabled.get():
+      self.adept_hardmode_enabled.set(False)
+      self.include_character.set(True)
+      self.update_include_character_setting()
+
+    self.update_adept_control_state()
+
+  def on_adept_hardmode_mode_changed(self):
+    if self.adept_hardmode_enabled.get():
+      self.adept_enabled.set(False)
+      self.include_character.set(True)
+      self.update_include_character_setting()
+
+    self.update_adept_control_state()
+  
+  def update_adept_control_state(self):
+    if not hasattr(self, "perk_count_slider"):
+      return
+
+    if self.adept_enabled.get() or self.adept_hardmode_enabled.get():
+      self.perk_count_slider.set(3)
+      self.perk_count_slider.config(state="disabled")
+      self.update_perk_count_label(3)
+    else:
+      self.perk_count_slider.config(state="normal")
 
   def build_randomize_controls(self):
     self.result_label = tk.Label(self.root, text="Choose Survivor or Killer, then press Randomize!", font=("Arial", 12))
@@ -1663,6 +1727,8 @@ class BuildSlotMachineApp:
       "load_survivor_build_button",
       "load_killer_build_button",
       "unlock_characters_button",
+      "adept_checkbox",
+      "adept_hardmode_checkbox",
       "debug_character_menu",
       "debug_item_menu",
       "debug_addon_1_menu",
@@ -2005,6 +2071,35 @@ class BuildSlotMachineApp:
       "addons": random_addons,
       "offering": random_offering
     }
+  
+  def get_adept_perks_for_roll(self, selected_character):
+    role = self.current_role
+    character_list = self.get_current_character_list()
+
+    if selected_character is None:
+      return [], None
+
+    if self.adept_hardmode_enabled.get():
+      source_character = choose_adept_loadout_source_character(
+        role,
+        selected_character,
+        character_list
+      )
+    else:
+      source_character = selected_character
+
+    source_character_name = source_character["name"]
+    adept_perk_names = get_adept_perk_names(role, source_character_name)
+
+    available_perks = set(self.killer_perks if role == "Killer" else self.survivor_perks)
+
+    selected_perks = [
+      perk_name
+      for perk_name in adept_perk_names
+      if perk_name in available_perks
+    ]
+
+    return selected_perks, source_character
 
   def display_spin_frame(self, role, perk_count):
     character_pool = self.get_spin_character_pool(role)
@@ -2169,8 +2264,11 @@ class BuildSlotMachineApp:
 
     chosen_character = self.randomize_character(display=False)
     extra_roll = self.build_extra_roll(chosen_character)
+    adept_source_character = None
 
-    if perk_count == 0:
+    if self.adept_enabled.get() or self.adept_hardmode_enabled.get():
+      chosen_perks, adept_source_character = self.get_adept_perks_for_roll(chosen_character)
+    elif perk_count == 0:
       chosen_perks = []
     elif perk_count > len(available_perks):
       self.result_label.config(text="Not enough perks in this role list.")
@@ -2197,7 +2295,16 @@ class BuildSlotMachineApp:
 
       self.update_gauntlet_controls()
 
-      if chosen_character is None:
+      if self.adept_enabled.get() and chosen_character is not None:
+        self.result_label.config(text=f"Adept {role} build ready: {chosen_character['name']}.")
+      elif self.adept_hardmode_enabled.get() and chosen_character is not None and adept_source_character is not None:
+        self.result_label.config(
+          text=(
+            f"Adept Hardmode ready: {chosen_character['name']} "
+            f"with {adept_source_character['name']} perks."
+          )
+        )
+      elif chosen_character is None:
         self.result_label.config(text=f"Your random {role} perk build is ready!")
       else:
         self.result_label.config(text=f"Your random {role} build is ready!")
