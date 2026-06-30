@@ -32,6 +32,9 @@
 
 ## Building `spinthewheel.exe`
 
-1. Click the green button, download zip
-2. Extract files (I recommend a folder on your desktop)
-3. See my local_python repository for detailed instructions on creating the executable (https://github.com/Bob169633/portable_python)
+All the code is attached, only file write is to save your Zerb gauntlet stats, what characters you own, and if you want any builds saved. The only file read is pulling in any custom icons you have to display.
+See releases for the .exe
+
+## Notes
+
+Currently, I have no clue where Behaviour natively stores their normal icons, so if an icon pack doesn't have an icon for a perk or character portrait, no icons are displayed for that perk/character
